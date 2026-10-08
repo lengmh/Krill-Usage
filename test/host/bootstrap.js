@@ -28,10 +28,7 @@ async function activate(context) {
       assert.equal(confirmations.length, 0, "Unused synthetic confirmation");
     }
   };
-  const facade = {
-    ...vscode,
-    window: {
-      ...vscode.window,
+  const windowOverrides = {
       async showInputBox(options) {
         assert.equal(options.password, true, "Credential input must be masked");
         assert.ok(inputs.length, "Unexpected input dialog");
@@ -55,8 +52,13 @@ async function activate(context) {
         messages.push({ kind: "error", message });
         return undefined;
       }
-    }
   };
+  // Inherit APIs lazily. Spreading vscode/window would evaluate every getter,
+  // including proposed APIs which reject access in an ordinary extension.
+  const windowFacade = Object.create(vscode.window, Object.getOwnPropertyDescriptors(windowOverrides));
+  const facade = Object.create(vscode, {
+    window: { value: windowFacade, enumerable: true }
+  });
 
   harness = { context, transport, prompts, secretKey: SECRET_KEY, service: null, controller: null };
   const originalLoad = Module._load;
