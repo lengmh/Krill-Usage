@@ -179,9 +179,18 @@ test("corrupt, symlinked, or public revision files are rejected without touching
     await assert.rejects(f.store.read(), noSecret);
   }
   fs.unlinkSync(marker);
-  fs.symlinkSync(path.join(f.stateDir, "missing"), marker);
-  await assert.rejects(f.store.read(), noSecret);
-  fs.unlinkSync(marker);
+  await t.test("symlinked revision file is rejected", async (symlinkTest) => {
+    try { fs.symlinkSync(path.join(f.stateDir, "missing"), marker, "file"); }
+    catch (error) {
+      if (process.platform === "win32" && ["EPERM", "EACCES"].includes(error?.code)) {
+        symlinkTest.skip("Windows runner does not permit creating symbolic links");
+        return;
+      }
+      throw error;
+    }
+    try { await assert.rejects(f.store.read(), noSecret); }
+    finally { fs.unlinkSync(marker); }
+  });
   await f.store.replace(TOKEN_A);
   if (process.platform !== "win32") {
     fs.chmodSync(marker, 0o644);
@@ -197,10 +206,21 @@ test("public or symlinked state directories are not used", async (t) => {
     await assert.rejects(f.store.replace(TOKEN_A), noSecret);
     fs.chmodSync(f.stateDir, 0o700);
   }
-  const linked = path.join(f.stateDir, "link");
-  fs.symlinkSync(f.stateDir, linked, "dir");
-  const store = createCredentialStore({ stateDir: linked, entryFactory: () => f.entry });
-  await assert.rejects(store.read(), noSecret);
+  await t.test("symlinked state directory is rejected", async (symlinkTest) => {
+    const linked = path.join(f.stateDir, "link");
+    try { fs.symlinkSync(f.stateDir, linked, "dir"); }
+    catch (error) {
+      if (process.platform === "win32" && ["EPERM", "EACCES"].includes(error?.code)) {
+        symlinkTest.skip("Windows runner does not permit creating symbolic links");
+        return;
+      }
+      throw error;
+    }
+    try {
+      const store = createCredentialStore({ stateDir: linked, entryFactory: () => f.entry });
+      await assert.rejects(store.read(), noSecret);
+    } finally { fs.unlinkSync(linked); }
+  });
 });
 
 test("onDidChange observes nonsecret marker changes without reading the vault", async (t) => {
@@ -234,11 +254,12 @@ test("explicit recovery refuses a live lock and removes only a dead lock", async
 });
 
 test("state directory choices contain no credential and respect absolute XDG state paths", () => {
-  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: {} }), "/home/synthetic/.local/state/krill-usage-codex");
-  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: { XDG_STATE_HOME: "/tmp/synthetic-state" } }), "/tmp/synthetic-state/krill-usage-codex");
-  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: { XDG_STATE_HOME: "relative" } }), "/home/synthetic/.local/state/krill-usage-codex");
-  assert.match(defaultStateDir({ platform: "darwin", home: "/Users/synthetic", env: {} }), /Library\/Application Support/u);
-  assert.match(defaultStateDir({ platform: "win32", home: "/synthetic", env: { LOCALAPPDATA: "/local" } }), /local\/krill-usage-codex$/u);
+  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: {} }), path.join("/home/synthetic", ".local", "state", "krill-usage-codex"));
+  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: { XDG_STATE_HOME: "/tmp/synthetic-state" } }), path.join("/tmp/synthetic-state", "krill-usage-codex"));
+  assert.equal(defaultStateDir({ platform: "linux", home: "/home/synthetic", env: { XDG_STATE_HOME: "relative" } }), path.join("/home/synthetic", ".local", "state", "krill-usage-codex"));
+  assert.equal(defaultStateDir({ platform: "darwin", home: "/Users/synthetic", env: {} }), path.join("/Users/synthetic", "Library", "Application Support", "krill-usage-codex"));
+  assert.equal(defaultStateDir({ platform: "win32", home: "/synthetic", env: { LOCALAPPDATA: "/local" } }), path.join("/local", "krill-usage-codex"));
+  assert.equal(defaultStateDir({ platform: "win32", home: "/synthetic", env: {} }), path.join("/synthetic", "AppData", "Local", "krill-usage-codex"));
 });
 
 test("hidden input emits no token or asterisks and restores terminal state", async () => {
