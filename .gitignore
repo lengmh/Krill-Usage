@@ -1,0 +1,6 @@
+node_modules/
+.vscode-test/
+.host-test/
+*.vsix
+*.log
+.DS_Store

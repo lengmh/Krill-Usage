@@ -1,0 +1,144 @@
+{
+  "name": "krill-usage",
+  "displayName": "Krill Usage",
+  "description": "非官方 Krill 额度工具：在 VS Code 中查看套餐额度与账户余额。",
+  "version": "0.1.4",
+  "publisher": "lengmh",
+  "license": "GPL-3.0-only",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "krill",
+    "usage",
+    "quota",
+    "ai",
+    "coding"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:krillUsage.setJwt",
+    "onCommand:krillUsage.refresh",
+    "onCommand:krillUsage.clearJwt"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "krillUsage.setJwt",
+        "title": "Krill: Set JWT",
+        "category": "Krill Usage"
+      },
+      {
+        "command": "krillUsage.refresh",
+        "title": "Krill: Refresh Usage",
+        "category": "Krill Usage"
+      },
+      {
+        "command": "krillUsage.clearJwt",
+        "title": "Krill: Clear JWT",
+        "category": "Krill Usage"
+      }
+    ],
+    "configuration": {
+      "title": "Krill Usage",
+      "properties": {
+        "krillUsage.refreshIntervalMinutes": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "自动向 Krill 查询额度的间隔（分钟）。"
+        },
+        "krillUsage.showBalanceInStatusBar": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否在状态栏中同时显示账户余额。"
+        },
+        "krillUsage.statusBarIcon": {
+          "type": "string",
+          "default": "pulse",
+          "enum": [
+            "pulse",
+            "dashboard",
+            "graph",
+            "symbol-numeric",
+            "database",
+            "credit-card",
+            "zap",
+            "chip",
+            "flame",
+            "rocket",
+            "code",
+            "circuit-board"
+          ],
+          "enumDescriptions": [
+            "脉冲波形：实时状态 / 活跃监控",
+            "仪表盘：总览 / 状态",
+            "图表：统计 / 数据",
+            "数字：额度 / 数值",
+            "数据库：资源 / 配额",
+            "信用卡：余额 / 消费",
+            "闪电：快速 / 实时",
+            "芯片：AI / 计算",
+            "火焰：消耗 / 活跃",
+            "火箭：AI / Coding / 效率",
+            "代码：开发 / 编程",
+            "电路板：技术 / 计算"
+          ],
+          "description": "状态栏 Krill Usage 左侧使用的 VS Code Codicon 图标。"
+        },
+        "krillUsage.lowQuotaWarningPercent": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "剩余额度百分比小于或等于该值时，状态栏使用警告色。设为 0 表示仅在额度为 0 时进入警告区间。"
+        },
+        "krillUsage.lowQuotaCriticalPercent": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "剩余额度百分比小于或等于该值时，状态栏使用危险色。建议不高于警告阈值。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/extension.js && node --check src/service.js && node --check src/statusBar.js && node --check src/api.js && node --check src/model.js && node --check src/format.js && node --check src/jwt.js && node --check src/constants.js",
+    "test:host": "node test/run-host.js",
+    "package": "vsce package --no-dependencies --out krill-usage-0.1.4.vsix"
+  },
+  "files": [
+    "src/**",
+    "media/icon.png",
+    "README.md",
+    "PRIVACY.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE",
+    "TEST_REPORT.md"
+  ],
+  "author": "MAOHENG LENG (lengmh)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lengmh/Krill-Usage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lengmh/Krill-Usage/issues"
+  },
+  "homepage": "https://github.com/lengmh/Krill-Usage#readme",
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0"
+  }
+}
