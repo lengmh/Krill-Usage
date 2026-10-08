@@ -13,11 +13,12 @@ const messages = {
 export class UsageService {
   constructor({credentials, preferences, fetchUsage = fetchSubscription, now = Date.now}) {
     this.credentials = credentials; this.preferences = preferences; this.fetchUsage = fetchUsage; this.now = now;
-    this.generation = 0; this.active = null; this.disposed = false; this.revision = undefined;
+    this.generation = 0; this.stateRevision = 0; this.active = null; this.disposed = false; this.revision = undefined;
     this.reset();
     this.subscription = credentials.onDidChange?.(() => this.invalidate());
   }
-  reset() { this.snapshot = null; this.error = null; this.lastSuccessAt = 0; this.authenticated = false; }
+  // Order account resets independently of request ownership or success timestamps.
+  reset() { this.stateRevision++; this.snapshot = null; this.error = null; this.lastSuccessAt = 0; this.authenticated = false; }
   invalidate() { this.generation++; this.active = null; this.revision = undefined; this.reset(); }
   safeError(error) {
     const code = Object.hasOwn(messages, error?.code) ? error.code : 'ERROR';
@@ -26,7 +27,7 @@ export class UsageService {
   view() {
     const refreshMinutes = this.preferences.read().refreshIntervalMinutes;
     return { snapshot: this.snapshot, error: this.error, refreshing: Boolean(this.active),
-      lastSuccessAt: this.lastSuccessAt, authenticated: this.authenticated, refreshMinutes,
+      lastSuccessAt: this.lastSuccessAt, stateRevision: this.stateRevision, authenticated: this.authenticated, refreshMinutes,
       stale: Boolean(this.snapshot && (this.error || this.now() - this.lastSuccessAt >= refreshMinutes * 60000)) };
   }
   async read() {

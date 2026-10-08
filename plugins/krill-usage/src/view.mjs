@@ -116,6 +116,7 @@ export function normalizePayload(payload = {}) {
       error: view.error && typeof view.error.code === 'string' ? { code: view.error.code, message: typeof view.error.message === 'string' ? view.error.message : '查询失败，请稍后重试。' } : null,
       refreshing: view.refreshing === true,
       lastSuccessAt: numberOrNull(view.lastSuccessAt) ?? 0,
+      stateRevision: Number.isSafeInteger(view.stateRevision) && view.stateRevision >= 0 ? view.stateRevision : 0,
       authenticated: view.authenticated === true,
       stale: view.stale === true,
       refreshMinutes: numberOrNull(view.refreshMinutes) ?? 3
@@ -156,15 +157,16 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
   let aborter = null;
   let generation = 0;
   let entryReceived = false;
-  let requestResultReceived = false;
   const emit = () => { if (!state.disposed) onChange(state); };
   function receive(result, { entry = false } = {}) {
     if (state.disposed || !result?.structuredContent?.view) return false;
     const payload = normalizePayload(result.structuredContent);
-    // An entry GET can finish after our initial cache read, or arrive late with
-    // an older snapshot. Preserve the newest successful server snapshot.
-    if (!entry || !requestResultReceived || payload.view.lastSuccessAt >= state.payload.view.lastSuccessAt) state.payload = payload;
-    if (!entry) requestResultReceived = true;
+    // Resets outrank older account data in either delivery order. Within the
+    // same revision, preserve the newest successful snapshot on both channels.
+    const incomingRevision = payload.view.stateRevision;
+    const currentRevision = state.payload.view.stateRevision;
+    if (incomingRevision > currentRevision || (incomingRevision === currentRevision &&
+        payload.view.lastSuccessAt >= state.payload.view.lastSuccessAt)) state.payload = payload;
     if (entry && !entryReceived) {
       state.page = payload.page;
       entryReceived = true;

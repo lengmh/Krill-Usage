@@ -4,9 +4,10 @@ import { JSDOM } from 'jsdom';
 import {
   DEFAULT_PREFERENCES, numberOrNull, money, primarySubscription, remainingPercent,
   percentText, quotaTone, dateText, countdown, freshness, usageModel,
-  validatePreferences, normalizePreferences, createController
+  validatePreferences, normalizePreferences, normalizePayload, createController
 } from '../src/view.mjs';
 import { mountKrillApp } from '../src/app.mjs';
+import { UsageService } from '../src/service.mjs';
 
 const now = Date.now();
 const plans = [
@@ -18,7 +19,7 @@ const plans = [
 const payload = (overrides = {}) => ({
   page: 'usage',
   preferences: { ...DEFAULT_PREFERENCES },
-  view: { snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, error: null, refreshMinutes: 3 },
+  view: { snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, stateRevision: 1, error: null, refreshMinutes: 3 },
   ...overrides
 });
 const result = (data = payload()) => ({ content: [], structuredContent: data });
@@ -146,6 +147,89 @@ test('late entry results preserve newer cache but accept newer initial GET', () 
   assert.equal(controller.state.payload.view.snapshot.creditBalance, '9');
   controller.dispose();
 });
+
+test('payload state revisions accept only nonnegative safe integers', () => {
+  for (const stateRevision of [undefined, null, '2', -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(normalizePayload({ view: { stateRevision } }).view.stateRevision, 0);
+  }
+  assert.equal(normalizePayload({ view: { stateRevision: 2 } }).view.stateRevision, 2);
+});
+
+for (const transition of ['clear', 'switch', 'vault read failure', 'vault error recheck failure']) {
+  for (const resetIsEntry of [false, true]) {
+    test(`${transition}: reset and cached results stay ordered when reset is ${resetIsEntry ? 'entry' : 'app'} response`, async (t) => {
+      const account = { revision: 'synthetic-revision-a', jwt: 'synthetic-account-a' };
+      const credentials = { readRevision: async () => account.revision, read: async () => account.jwt };
+      const preferences = { read: () => ({ ...DEFAULT_PREFERENCES }) };
+      const service = new UsageService({ credentials, preferences, now: () => now,
+        fetchUsage: async () => ({ creditBalance: '100', subscriptions: [] }) });
+      t.after(() => service.dispose());
+      const cached = await service.refresh();
+      assert.equal((await service.read()).stateRevision, cached.stateRevision);
+      assert.equal((await service.refresh()).stateRevision, cached.stateRevision);
+      let reset;
+      if (transition === 'clear' || transition === 'switch') {
+        account.revision = 'synthetic-revision-b';
+        account.jwt = transition === 'clear' ? null : 'synthetic-account-b';
+        reset = transition === 'clear' ? await service.refresh() : await service.read();
+      } else if (transition === 'vault read failure') {
+        credentials.read = async () => { throw Object.assign(new Error('private vault details'), { code: 'SECRET_STORAGE' }); };
+        reset = await service.refresh();
+      } else {
+        service.fetchUsage = async () => {
+          credentials.readRevision = async () => { throw new Error('private vault details'); };
+          throw Object.assign(new Error('synthetic network failure'), { code: 'NETWORK' });
+        };
+        reset = await service.refresh();
+      }
+      assert.equal(reset.snapshot, null);
+      assert.equal(reset.authenticated, false);
+      assert.equal(reset.lastSuccessAt, 0);
+      assert.ok(reset.stateRevision > cached.stateRevision);
+      if (transition.startsWith('vault')) assert.equal(reset.error.code, 'SECRET_STORAGE');
+      for (const resetFirst of [false, true]) {
+        const controller = createController({ callTool: async () => result() });
+        try {
+          const responses = [
+            { view: cached, entry: !resetIsEntry },
+            { view: reset, entry: resetIsEntry }
+          ];
+          if (resetFirst) responses.reverse();
+          for (const { view, entry } of responses) {
+            controller.receive(result({ view, preferences: preferences.read(), page: entry ? 'settings' : 'usage' }), { entry });
+          }
+          assert.deepEqual(controller.state.payload.view, normalizePayload({ view: reset }).view,
+            `reset delivered ${resetFirst ? 'first' : 'last'}`);
+          assert.equal(controller.state.page, 'settings');
+          assert.doesNotMatch(JSON.stringify(controller.state.payload), /synthetic-|private vault/);
+        } finally { controller.dispose(); }
+      }
+    });
+  }
+}
+
+for (const resetIsEntry of [false, true]) {
+  test(`new account success survives a delayed ${resetIsEntry ? 'entry' : 'app'} reset from the same revision`, async (t) => {
+    const account = { revision: 'synthetic-revision-a', jwt: 'synthetic-account-a' };
+    const credentials = { readRevision: async () => account.revision, read: async () => account.jwt };
+    const preferences = { read: () => ({ ...DEFAULT_PREFERENCES }) };
+    const service = new UsageService({ credentials, preferences, now: () => now,
+      fetchUsage: async (jwt) => ({ creditBalance: jwt === 'synthetic-account-a' ? '100' : '200', subscriptions: [] }) });
+    const controller = createController({ callTool: async () => result() });
+    t.after(() => { controller.dispose(); service.dispose(); });
+    await service.refresh();
+    account.revision = 'synthetic-revision-b';
+    account.jwt = 'synthetic-account-b';
+    const reset = await service.read();
+    const refreshed = await service.refresh();
+    assert.equal(reset.stateRevision, refreshed.stateRevision);
+    assert.equal(refreshed.snapshot.creditBalance, '200');
+    controller.receive(result({ view: refreshed, page: !resetIsEntry ? 'settings' : 'usage' }), { entry: !resetIsEntry });
+    controller.receive(result({ view: reset, page: resetIsEntry ? 'settings' : 'usage' }), { entry: resetIsEntry });
+    assert.deepEqual(controller.state.payload.view, normalizePayload({ view: refreshed }).view);
+    assert.equal(controller.state.page, 'settings');
+  });
+}
 
 test('abort before dispatch cancels old request without stealing a newer signal', async () => {
   const calls = [];
