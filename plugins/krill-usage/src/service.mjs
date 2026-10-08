@@ -99,5 +99,5 @@ export class UsageService {
     } finally { if (owns()) this.active = null; }
     return this.view();
   }
-  dispose() { this.disposed = true; this.invalidate(); this.subscription?.dispose?.(); }
+  dispose() { this.disposed = true; this.invalidate(); this.subscription?.dispose?.(); this.credentials.dispose?.(); }
 }

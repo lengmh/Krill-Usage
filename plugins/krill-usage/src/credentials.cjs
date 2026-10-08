@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { spawn } = require("node:child_process");
 const { sanitizeJwt } = require("../../../src/jwt.js");
 const { validateRawCredential } = require("./credential-prompt.cjs");
 
@@ -12,7 +13,27 @@ const ACCOUNT = "krill_jwt";
 const REVISION_FILE = "credential-revision.json";
 const LOCK_FILE = "credential-write.lock";
 const MAX_CREDENTIAL_LENGTH = 16_384;
+const READ_TIMEOUT_MS = 5_000;
 const STORAGE_MESSAGE = "Secure credential storage is unavailable, locked, or changing. Unlock your OS vault and retry the owner-only credential command. No plaintext fallback is used.";
+
+// AsyncEntry still connects to Secret Service synchronously in its constructor,
+// and aborting a running native task cannot stop its libuv worker. Isolate the
+// complete read in a disposable process; no secret goes through args or stdio.
+const READ_SCRIPT = `
+process.once("disconnect", () => process.exit(0));
+async function read() {
+  try {
+    const { AsyncEntry } = require(process.argv[1]);
+    const entry = new AsyncEntry(${JSON.stringify(SERVICE)}, ${JSON.stringify(ACCOUNT)}, { linux: { store: "secret-service" } });
+    const value = await entry.getPassword();
+    if (value != null && (typeof value !== "string" || value.length > ${MAX_CREDENTIAL_LENGTH})) throw new Error();
+    process.send({ ok: true, value: value ?? null }, () => process.exit(0));
+  } catch {
+    process.send({ ok: false }, () => process.exit(0));
+  }
+}
+void read();
+`;
 
 function storageError() {
   return Object.assign(new Error(STORAGE_MESSAGE), { code: "SECRET_STORAGE" });
@@ -44,6 +65,8 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
   const lockPath = path.join(stateDir, LOCK_FILE);
   let entry;
   let writes = Promise.resolve();
+  let activeRead;
+  let disposed = false;
 
   function checkPrivate(stat, isDirectory) {
     if (isDirectory ? !stat.isDirectory() : !stat.isFile()) throw storageError();
@@ -116,6 +139,68 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return entry;
   }
 
+  function readVault(revision) {
+    if (disposed) return Promise.reject(storageError());
+    // Do not reuse an old-account read or start more helpers before the previous
+    // one has exited. The service already coalesces refreshes above this layer.
+    if (activeRead) return activeRead.revision === revision && !activeRead.settled
+      ? activeRead.promise : Promise.reject(storageError());
+    const operation = { revision, settled: false, promise: null, cancel: null };
+    activeRead = operation;
+    operation.promise = new Promise((resolve, reject) => {
+      let child, timer, received = false, value;
+      const kill = () => { try { child?.kill("SIGKILL"); } catch {} };
+      const fail = () => {
+        value = undefined;
+        if (!operation.settled) {
+          operation.settled = true;
+          clearTimeout(timer);
+          reject(storageError());
+        }
+        kill();
+      };
+      operation.cancel = fail;
+      timer = setTimeout(fail, READ_TIMEOUT_MS);
+      try {
+        // Resolve from this module, including the packaged bundle, not the cwd.
+        // Do not inherit execArgv (test runners, inspectors, or preloads).
+        child = spawn(process.execPath, ["-e", READ_SCRIPT, require.resolve("@napi-rs/keyring")], {
+          shell: false, windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"]
+        });
+      } catch {
+        activeRead = null;
+        fail();
+        return;
+      }
+      child.on("error", fail);
+      child.on("message", message => {
+        if (operation.settled) return;
+        if (received || message?.ok !== true ||
+            (message.value !== null && (typeof message.value !== "string" || message.value.length > MAX_CREDENTIAL_LENGTH))) {
+          fail(); return;
+        }
+        received = true;
+        value = message.value;
+      });
+      child.once("close", (code, signal) => {
+        if (activeRead === operation) activeRead = null;
+        if (!operation.settled) {
+          if (code !== 0 || signal || !received) { fail(); return; }
+          operation.settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+        value = undefined;
+      });
+    });
+    return operation.promise;
+  }
+
+  function dispose() {
+    disposed = true;
+    activeRead?.cancel();
+  }
+
   async function readRevision() {
     try {
       const marker = readMarker();
@@ -127,7 +212,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
   async function read() {
     try {
       const before = await readRevision();
-      const value = await getEntry().getPassword();
+      const value = Entry || entryFactory ? await getEntry().getPassword() : await readVault(before);
       if (before !== await readRevision()) throw storageError();
       if (value === null || value === undefined) return null;
       return normalizeCredential(value);
@@ -225,7 +310,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     }
   }
 
-  return { read, replace, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite };
+  return { read, replace, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
 }
 
-module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH };
+module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH, READ_TIMEOUT_MS };
