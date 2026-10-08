@@ -1,0 +1,15 @@
+{
+  "name": "krill-usage-codex-plugin", "version": "0.1.0", "private": true,
+  "description": "Unofficial local Krill Usage plugin for Codex desktop",
+  "license": "GPL-3.0-only", "type": "module", "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs", "check": "node scripts/check.mjs",
+    "test": "node --test test/*.test.*", "package": "node scripts/package.mjs",
+    "credentials": "node dist/credential-cli.cjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5", "@modelcontextprotocol/sdk": "1.29.0",
+    "@openai/mcp-extensions": "0.1.0", "@napi-rs/keyring": "2.1.0", "zod": "4.4.3"
+  },
+  "devDependencies": { "esbuild": "0.28.1", "jsdom": "27.0.0" }
+}

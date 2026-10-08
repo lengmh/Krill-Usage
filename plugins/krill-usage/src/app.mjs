@@ -1,0 +1,350 @@
+import { App, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
+import {
+  createController, usageModel, money, remainingPercent, percentText,
+  quotaTone, statusText, planTypeText, dateText, countdown, validatePreferences
+} from './view.mjs';
+
+const CREDENTIAL_COMMAND = 'node dist/credential-cli.cjs set';
+
+function element(doc, tag, className, text) {
+  const node = doc.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+export function mountKrillApp({ app, root, doc = document, win = window }) {
+  const el = (tag, cls, text) => element(doc, tag, cls, text);
+  const button = (text, cls = 'button') => {
+    const node = el('button', cls, text);
+    node.type = 'button';
+    return node;
+  };
+  const shell = el('main', 'krill-shell');
+  const header = el('header', 'app-header');
+  const identity = el('div', 'identity');
+  const mark = el('span', 'brand-mark', 'K');
+  mark.setAttribute('aria-hidden', 'true');
+  const titles = el('div');
+  titles.append(el('h1', 'app-title', 'Krill Usage'), el('p', 'eyebrow', '额度概览 · 非官方工具'));
+  identity.append(mark, titles);
+  const refresh = button('刷新', 'button refresh-button');
+  refresh.setAttribute('aria-label', '立即刷新 Krill 额度');
+  header.append(identity, refresh);
+  const nav = el('nav', 'page-nav');
+  nav.setAttribute('aria-label', '面板页面');
+  const usageNav = button('额度', 'nav-button');
+  const settingsNav = button('设置', 'nav-button');
+  nav.append(usageNav, settingsNav);
+  const notice = el('p', 'notice');
+  notice.setAttribute('role', 'status');
+  notice.setAttribute('aria-live', 'polite');
+  notice.hidden = true;
+  const usage = el('section', 'usage-page');
+  usage.setAttribute('aria-label', '额度概览');
+  const status = el('div', 'sync-status');
+  const statusLabel = el('span', 'sync-label');
+  const statusAge = el('span', 'sync-age');
+  status.setAttribute('role', 'status');
+  status.append(statusLabel, statusAge);
+  const error = el('p', 'error-detail');
+  const hero = el('section', 'hero-card');
+  const heroBody = el('div', 'hero-body');
+  const heroLabel = el('p', 'field-label');
+  const heroAmount = el('p', 'hero-amount');
+  const heroDetail = el('p', 'hero-detail');
+  heroBody.append(heroLabel, heroAmount, heroDetail);
+  const balanceAside = el('div', 'balance-aside');
+  const balanceAmount = el('p', 'balance-amount');
+  balanceAside.append(el('p', 'field-label', '账户余额'), balanceAmount, el('p', 'muted tiny', 'USD'));
+  hero.append(heroBody, balanceAside);
+  const planHeader = el('div', 'section-heading');
+  const planCount = el('span', 'count-badge');
+  planHeader.append(el('h2', '', '全部套餐'), planCount);
+  const planList = el('div', 'plan-list');
+  const setupUsage = createSetup();
+  const empty = el('div', 'empty-card');
+  usage.append(status, error, hero, planHeader, planList, empty, setupUsage);
+
+  const settings = el('section', 'settings-page');
+  settings.hidden = true;
+  settings.setAttribute('aria-label', '面板设置');
+  const settingsHeading = el('div', 'settings-heading');
+  settingsHeading.append(el('h2', '', '面板设置'), el('p', 'muted', '保存在本机，重新打开后仍然生效。'));
+  const form = el('form', 'settings-form');
+  const inputs = {};
+  const intervalRow = field('refreshIntervalMinutes', '刷新间隔', '面板可见时自动查询；关闭后停止。', 1, 60, '分钟');
+  const showRow = el('div', 'setting-row');
+  const showLabel = el('label', 'setting-copy');
+  showLabel.htmlFor = 'showBalance';
+  showLabel.append(el('span', 'setting-name', '显示账户余额'), el('span', 'muted setting-description', '隐藏后仍会显示套餐额度。'));
+  const showInput = el('input', 'toggle');
+  showInput.type = 'checkbox';
+  showInput.id = 'showBalance';
+  inputs.showBalance = showInput;
+  showRow.append(showLabel, showInput);
+  const warningRow = field('lowQuotaWarningPercent', '低额度提醒', '剩余额度达到此比例时标为橙色。', 0, 100, '%');
+  const criticalRow = field('lowQuotaCriticalPercent', '紧急提醒', '需小于或等于低额度提醒比例。', 0, 100, '%');
+  const actions = el('div', 'form-actions');
+  const save = button('保存设置', 'button primary-button');
+  save.type = 'submit';
+  const reload = button('重新加载', 'button quiet-button');
+  actions.append(save, reload);
+  const formStatus = el('p', 'form-status');
+  formStatus.setAttribute('role', 'status');
+  formStatus.setAttribute('aria-live', 'polite');
+  form.append(intervalRow, showRow, warningRow, criticalRow, actions, formStatus);
+  const setupSettings = createSetup();
+  settings.append(settingsHeading, form, setupSettings);
+  const footer = el('footer', 'app-footer');
+  const footerText = el('span');
+  const lastSuccess = el('span', 'last-success');
+  footer.append(footerText, el('span', '', '金额单位 USD · 以 Krill 为准'), lastSuccess);
+  shell.append(header, nav, notice, usage, settings, footer);
+  root.replaceChildren(shell);
+
+  let dirty = false;
+  let disposed = false;
+  let suspended = false;
+  let refreshTimer = null;
+  let tickTimer = null;
+  let settingsEditVersion = 0;
+  let lastRequestAt = Date.now();
+  const controller = createController({ callTool: (params, options) => app.callServerTool(params, options), onChange: render });
+
+  function createSetup() {
+    const box = el('aside', 'setup-card');
+    box.append(el('h2', '', '本机凭证'), el('p', 'muted', '在你自己的终端中，进入插件目录并运行：'), el('code', 'setup-command', CREDENTIAL_COMMAND), el('p', 'setup-warning', '不要把 JWT 粘贴到聊天或设置中。'));
+    box.append(el('p', 'muted tiny', '更新凭证后，点击刷新或关闭并重新打开面板。'));
+    return box;
+  }
+
+  function field(name, title, description, min, max, suffix) {
+    const row = el('div', 'setting-row');
+    const label = el('label', 'setting-copy');
+    label.htmlFor = name;
+    const descriptionNode = el('span', 'muted setting-description', description);
+    descriptionNode.id = `${name}-hint`;
+    label.append(el('span', 'setting-name', title), descriptionNode);
+    const control = el('div', 'number-control');
+    const input = el('input');
+    input.type = 'number';
+    input.inputMode = 'decimal';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = name === 'refreshIntervalMinutes' ? '1' : 'any';
+    input.required = true;
+    input.id = name;
+    input.setAttribute('aria-describedby', descriptionNode.id);
+    inputs[name] = input;
+    control.append(input, el('span', 'muted', suffix));
+    row.append(label, control);
+    return row;
+  }
+
+  function render() {
+    if (disposed) return;
+    const state = controller.state;
+    const model = usageModel(state.payload);
+    // Another panel may be refreshing. A click can join that server-side request.
+    const busy = Boolean(state.pending);
+    refresh.disabled = !state.connected || busy;
+    refresh.textContent = busy ? '同步中…' : '刷新';
+    refresh.setAttribute('aria-busy', String(busy));
+    usage.hidden = state.page !== 'usage';
+    settings.hidden = state.page !== 'settings';
+    usageNav.setAttribute('aria-current', state.page === 'usage' ? 'page' : 'false');
+    settingsNav.setAttribute('aria-current', state.page === 'settings' ? 'page' : 'false');
+    notice.textContent = state.notice;
+    notice.hidden = !state.notice;
+    const fresh = model.freshness;
+    status.dataset.tone = fresh.tone;
+    statusLabel.textContent = !state.connected ? '正在连接面板' : state.pending === 'krill.refresh' ? '正在同步额度' : fresh.label;
+    statusAge.textContent = fresh.ageText;
+    statusAge.title = `上次成功同步：${fresh.timestamp}`;
+    error.hidden = !model.view.error;
+    error.textContent = model.view.error?.message ?? '';
+    hero.hidden = !model.view.snapshot;
+    heroLabel.textContent = model.primaryLabel;
+    heroAmount.textContent = model.primaryValue;
+    hero.dataset.tone = quotaTone(model.primaryPercent, model.preferences);
+    heroDetail.textContent = model.primary ? `${model.primary.name || '未命名套餐'} · ${percentText(model.primaryPercent)} 可用` : '当前没有可用的套餐额度';
+    balanceAside.hidden = !model.primary || !model.preferences.showBalance;
+    balanceAmount.textContent = model.balance;
+    planHeader.hidden = !model.view.snapshot;
+    planCount.textContent = String(model.plans.length);
+    const cards = model.plans.map((plan, index) => planCard(plan, model, index));
+    planList.replaceChildren(...cards);
+    planList.hidden = !cards.length;
+    empty.hidden = !model.view.authenticated || cards.length > 0;
+    empty.replaceChildren(el('h2', '', model.view.snapshot ? '暂无套餐' : '还没有额度数据'), el('p', 'muted', model.view.snapshot ? '账户余额已显示在上方。' : model.view.error ? '请检查本机凭证和网络，然后重试。' : '点击刷新，查询套餐额度和账户余额。'));
+    setupUsage.hidden = model.view.authenticated;
+    setupSettings.querySelector('h2').textContent = model.view.authenticated ? '本机凭证 · 已配置' : model.view.error?.code === 'NO_JWT' ? '本机凭证 · 未配置' : '本机凭证 · 待验证';
+    if (!dirty) {
+      for (const [name, input] of Object.entries(inputs)) {
+        if (input.type === 'checkbox') input.checked = model.preferences[name];
+        else input.value = String(model.preferences[name]);
+      }
+    }
+    save.disabled = !state.connected || busy || !dirty;
+    reload.disabled = !state.connected || busy;
+    save.textContent = state.pending === 'krill.updateSettings' ? '保存中…' : '保存设置';
+    footerText.textContent = doc.visibilityState === 'hidden' ? '自动刷新已暂停' : `每 ${model.preferences.refreshIntervalMinutes} 分钟刷新 · 仅面板可见时`;
+    lastSuccess.textContent = `上次成功同步：${fresh.timestamp}`;
+    schedule();
+  }
+
+  function planCard(plan, model, index) {
+    const card = el('article', 'plan-card');
+    const percent = remainingPercent(plan.remaining, plan.limit);
+    const tone = plan.status === 'active' ? quotaTone(percent, model.preferences) : 'muted';
+    card.dataset.tone = tone;
+    const top = el('div', 'plan-topline');
+    const type = el('span', 'plan-type', planTypeText(plan.type));
+    const statusBadge = el('span', 'status-badge', statusText(plan.status));
+    top.append(type, statusBadge);
+    const title = el('h3', 'plan-title', typeof plan.name === 'string' && plan.name ? plan.name : `套餐 ${index + 1}`);
+    const amountRow = el('div', 'plan-amount-row');
+    amountRow.append(el('strong', 'plan-amount', money(plan.remaining)), el('span', 'muted tiny', `剩余 / ${money(plan.limit)}`));
+    const meter = el('div', 'quota-meter');
+    if (percent !== null) {
+      meter.setAttribute('role', 'meter');
+      meter.setAttribute('aria-label', `${title.textContent}剩余额度`);
+      meter.setAttribute('aria-valuemin', '0');
+      meter.setAttribute('aria-valuemax', '100');
+      meter.setAttribute('aria-valuenow', String(percent));
+      meter.setAttribute('aria-valuetext', `${percentText(percent)} 可用`);
+      const fill = el('span', 'quota-fill');
+      fill.style.width = `${percent}%`;
+      meter.append(fill);
+    } else {
+      meter.classList.add('unknown-meter');
+      meter.setAttribute('aria-label', '额度比例未知');
+    }
+    const ratio = el('p', 'quota-caption', percent === null ? '额度比例未知' : `${percentText(percent)} 可用${tone === 'critical' ? ' · 额度紧张' : tone === 'warning' ? ' · 额度较低' : ''}`);
+    const dates = el('dl', 'plan-dates');
+    for (const [label, value] of [['额度重置', plan.resetAt], ['套餐到期', plan.endAt]]) {
+      const row = el('div');
+      const date = el('dd', '', dateText(value));
+      date.title = `${label}：${value ?? '未知'}（${countdown(value)}）`;
+      row.append(el('dt', '', label), date);
+      dates.append(row);
+    }
+    card.append(top, title, amountRow, meter, ratio, dates);
+    return card;
+  }
+
+  function clearTimers() {
+    if (refreshTimer !== null) win.clearTimeout(refreshTimer);
+    if (tickTimer !== null) win.clearTimeout(tickTimer);
+    refreshTimer = null;
+    tickTimer = null;
+  }
+
+  function schedule() {
+    clearTimers();
+    if (disposed || suspended || doc.visibilityState === 'hidden' || !controller.state.connected) return;
+    tickTimer = win.setTimeout(render, 60_000);
+    if (controller.state.pending || !controller.state.payload.view.authenticated) return;
+    const interval = controller.state.payload.preferences.refreshIntervalMinutes * 60_000;
+    const remaining = Math.max(1000, interval - (Date.now() - lastRequestAt));
+    refreshTimer = win.setTimeout(() => void request('krill.refresh'), remaining);
+  }
+
+  async function request(name, args) {
+    if (controller.state.pending || disposed) return false;
+    lastRequestAt = Date.now();
+    return controller.request(name, args);
+  }
+
+  refresh.addEventListener('click', () => void request('krill.refresh'));
+  usageNav.addEventListener('click', () => controller.navigate('usage'));
+  settingsNav.addEventListener('click', () => controller.navigate('settings'));
+  form.addEventListener('input', () => {
+    dirty = true;
+    settingsEditVersion += 1;
+    formStatus.textContent = '尚未保存';
+    save.disabled = !controller.state.connected || Boolean(controller.state.pending);
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (controller.state.pending || disposed) return;
+    const values = Object.fromEntries(Object.entries(inputs).map(([name, input]) => [name, input.type === 'checkbox' ? input.checked : input.value]));
+    const result = validatePreferences(values);
+    if (result.error) { formStatus.textContent = result.error; return; }
+    const editVersion = settingsEditVersion;
+    if (await request('krill.updateSettings', { set: result.set })) {
+      if (disposed) return;
+      if (editVersion === settingsEditVersion) dirty = false;
+      formStatus.textContent = dirty ? '已保存；还有新的修改待保存。' : '设置已保存';
+      render();
+    } else if (!disposed) formStatus.textContent = controller.state.notice || '保存结果尚未确认，请重新加载后检查。';
+  });
+  reload.addEventListener('click', async () => {
+    const editVersion = settingsEditVersion;
+    if (await request('krill.read')) {
+      if (disposed) return;
+      if (editVersion === settingsEditVersion) {
+        dirty = false;
+        formStatus.textContent = '已重新加载本机设置';
+      } else formStatus.textContent = '保留了刚刚输入的修改。';
+      render();
+    }
+  });
+
+  function visibilityChanged() {
+    clearTimers();
+    if (doc.visibilityState === 'hidden') {
+      // Cancel app requests on hide. The local service may finish its bounded GET.
+      controller.abort();
+      return;
+    }
+    render();
+    if (controller.state.connected) void request('krill.read');
+  }
+  doc.addEventListener('visibilitychange', visibilityChanged);
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    clearTimers();
+    controller.dispose();
+    doc.removeEventListener('visibilitychange', visibilityChanged);
+    win.removeEventListener('pagehide', pagehide);
+    win.removeEventListener('unload', dispose);
+    win.removeEventListener('pageshow', pageshow);
+    app.ontoolresult = undefined;
+    app.onhostcontextchanged = undefined;
+  }
+  function pagehide(event) {
+    if (event.persisted) { suspended = true; clearTimers(); controller.abort(); }
+    else dispose();
+  }
+  function pageshow(event) { if (event.persisted && !disposed) { suspended = false; visibilityChanged(); } }
+  win.addEventListener('pagehide', pagehide);
+  win.addEventListener('unload', dispose);
+  win.addEventListener('pageshow', pageshow);
+  app.ontoolresult = (result) => controller.receive(result, { entry: true });
+  const applyTheme = (context = {}) => {
+    if (context.theme === 'light' || context.theme === 'dark') doc.documentElement.dataset.theme = context.theme;
+    if (context.styles?.variables) applyHostStyleVariables(context.styles.variables, doc.documentElement);
+  };
+  app.onhostcontextchanged = applyTheme;
+  app.onteardown = async () => { dispose(); return {}; };
+  render();
+  const connected = app.connect().then(async () => {
+    if (disposed) return;
+    applyTheme(app.getHostContext?.());
+    controller.connect();
+    await request('krill.read');
+  }).catch(() => {
+    if (!disposed) controller.notify('无法连接宿主。请关闭后重新打开 Krill 面板。');
+  });
+  return { controller, connected, dispose, render };
+}
+
+if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+  const root = document.getElementById('app') ?? document.body.appendChild(document.createElement('div'));
+  root.id = 'app';
+  // A component fixture may mount an explicit bridge instead of connecting to a host.
+  if (!root.hasAttribute('data-manual-mount')) mountKrillApp({ app: new App({ name: 'Krill Usage', version: '0.1.0' }, {}, { autoResize: true }), root });
+}

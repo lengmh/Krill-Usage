@@ -1,0 +1,15 @@
+import { build } from 'esbuild';
+import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+process.chdir(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
+await rm('dist',{recursive:true,force:true}); await mkdir('dist',{recursive:true});
+const app = await build({entryPoints:['src/app.mjs'],bundle:true,write:false,platform:'browser',format:'iife',target:'es2022',minify:true,legalComments:'inline'});
+const js = app.outputFiles[0].text.replaceAll('</script','<\\/script');
+const css = await readFile('src/app.css','utf8');
+const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Krill Usage</title><style>${css}</style></head><body><main id="app"></main><script>${js}</script></body></html>`;
+await writeFile('dist/app.html',html);
+await build({entryPoints:['src/server.mjs'],bundle:true,platform:'node',format:'esm',target:'node22',outfile:'dist/server.js',external:['@napi-rs/keyring'],banner:{js:"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);"}});
+await build({entryPoints:['src/credential-cli.cjs'],bundle:true,platform:'node',format:'cjs',target:'node22',outfile:'dist/credential-cli.cjs',external:['@napi-rs/keyring']});
+await copyFile('../../LICENSE','dist/LICENSE'); await copyFile('../../NOTICE','dist/KRILL-NOTICE');
+console.log('Built local MCP server, credential CLI, and self-contained UI.');
