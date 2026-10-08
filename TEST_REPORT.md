@@ -15,6 +15,14 @@
 
 ## GitHub Actions 扩展宿主测试
 
+2026-10-08 的 [验证运行](https://github.com/lengmh/Krill-Usage/actions/runs/37722411572) 已通过，验证提交为 `d9b1c0a5e7b47db905a75d31591b9951b3a9305b`：
+
+- 38/38 单元与行为回归测试通过，VSIX 打包检查通过。
+- VS Code 1.95.0：11/11 扩展宿主场景通过。
+- VS Code stable（此次解析为 1.141.0）：11/11 扩展宿主场景通过。
+- 初次运行遇到测试包装器提前读取提案 API getter 的兼容性问题；仅修正测试包装器后通过，生产 `src/` 无改动。
+
+
 仓库配置了 Ubuntu / Xvfb 上的独立扩展宿主测试，分别使用声明支持的最低 VS Code 1.95.0 和当前 stable。每次提交的实际结果以对应 [Actions 运行记录](https://github.com/lengmh/Krill-Usage/actions) 为准。
 
 测试在临时目录中构建测试入口，生产 `src/` 文件保持原样；仅模拟 HTTPS 返回值和用户提示输入。测试实际激活扩展，并使用宿主的命令、配置、SecretStorage、StatusBarItem、ThemeColor 和 MarkdownString API。该测试不能证明各主题下的视觉对比度、鼠标交互或真实 Krill 服务可用性。
