@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { sanitizeJwt } = require("../../../src/jwt.js");
+const { validateRawCredential } = require("./credential-prompt.cjs");
 
 const SERVICE = "com.krill-usage.codex";
 const ACCOUNT = "krill_jwt";
@@ -25,9 +26,10 @@ function defaultStateDir({ platform = process.platform, env = process.env, home 
 }
 
 function normalizeCredential(raw) {
+  validateRawCredential(raw);
   const value = sanitizeJwt(raw);
   if (!value || /^Bearer$/iu.test(value) || value.length > MAX_CREDENTIAL_LENGTH || /[\s\u0000-\u001f\u007f]/u.test(value)) {
-    throw Object.assign(new Error("Enter one nonempty JWT in the hidden terminal prompt."), { code: "INVALID_JWT" });
+    throw Object.assign(new Error("Enter one nonempty JWT in the secure credential window."), { code: "INVALID_JWT" });
   }
   return value;
 }

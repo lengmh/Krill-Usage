@@ -12,7 +12,7 @@ const sample = {
     { id: 'demo-3', name: '体验天卡', type: 'daily', status: 'expired', remaining: '0', limit: '10', resetAt: null, endAt: new Date(initialTime - 86400000).toISOString() }
   ]
 };
-let view = { snapshot: sample, authenticated: true, refreshing: false, stale: false, error: null, lastSuccessAt: initialTime, stateRevision: 1, refreshMinutes: 3 };
+let view = { instanceId: 'preview-service', snapshot: sample, authenticated: true, refreshing: false, stale: false, error: null, lastSuccessAt: initialTime, stateRevision: 1, refreshMinutes: 3 };
 const query = new URLSearchParams(location.search);
 const initialPage = query.get('page') === 'settings' ? 'settings' : 'usage';
 const theme = query.get('theme') === 'dark' ? 'dark' : 'light';

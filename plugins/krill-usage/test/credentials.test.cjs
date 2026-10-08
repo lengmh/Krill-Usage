@@ -8,7 +8,7 @@ const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { spawnSync } = require("node:child_process");
 const { createCredentialStore, defaultStateDir, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH } = require("../src/credentials.cjs");
-const { hiddenInput, runCredentialCli } = require("../src/credential-cli.cjs");
+const { confirmationInput, runCredentialCli } = require("../src/credential-cli.cjs");
 
 const TOKEN_A = "synthetic-account-a";
 const TOKEN_B = "synthetic-account-b";
@@ -93,7 +93,7 @@ test("no JWT, account, or token hash is written to the nonsecret revision file",
 
 test("empty, control-containing, multiline, and oversized inputs never reach the vault", async (t) => {
   const f = fixture(t);
-  for (const value of ["", "  ", null, "Bearer   ", "abc\ndef", "abc def", "abc\u00a0def", "abc\u2028def", "abc\u0000def", "a".repeat(MAX_CREDENTIAL_LENGTH + 1)]) {
+  for (const value of ["", "  ", null, "Bearer   ", "abc\ndef", "abc def", "abc\u00a0def", "abc\u2028def", "abc\u0000def", TOKEN_A + "\r\n", "\n" + TOKEN_A, "\u0085" + TOKEN_A, "\u2028" + TOKEN_A, "a".repeat(MAX_CREDENTIAL_LENGTH + 1)]) {
     await assert.rejects(f.store.replace(value), { code: "INVALID_JWT" });
   }
   assert.equal(f.factoryArgs.length, 0);
@@ -262,52 +262,6 @@ test("state directory choices contain no credential and respect absolute XDG sta
   assert.equal(defaultStateDir({ platform: "win32", home: "/synthetic", env: {} }), path.join("/synthetic", "AppData", "Local", "krill-usage-codex"));
 });
 
-test("hidden input emits no token or asterisks and restores terminal state", async () => {
-  const tty = terminal();
-  const promise = hiddenInput(tty);
-  tty.send(`${TOKEN_A}\r`);
-  assert.equal(await promise, TOKEN_A);
-  assert.ok(!tty.written().includes(TOKEN_A));
-  assert.ok(!tty.written().includes("*"));
-  assert.deepEqual(tty.input.rawModes, [true, false]);
-  assert.equal(tty.input.readableFlowing, false);
-  assert.equal(tty.input.listenerCount("data"), 0);
-  assert.equal(tty.signals.listenerCount("SIGTERM"), 0);
-});
-
-test("hidden input supports backspace, erase-line, and bracketed paste without echo", async () => {
-  const tty = terminal();
-  const promise = hiddenInput(tty);
-  tty.send("discard\u0015abcX\u007f\u001b[200~def\u001b[201~\r");
-  assert.equal(await promise, "abcdef");
-  assert.ok(!tty.written().includes("abcdef"));
-});
-
-test("cancellation and end-of-input restore raw mode and drop secret input", async () => {
-  for (const cancel of [tty => tty.send("\u0003"), tty => tty.send("\u0004"), tty => tty.send("\u001a"), tty => tty.input.emit("end"), tty => tty.signals.emit("SIGTERM")]) {
-    const tty = terminal();
-    const promise = hiddenInput(tty);
-    tty.send(TOKEN_A);
-    cancel(tty);
-    await assert.rejects(promise, { code: "CANCELLED" });
-    assert.equal(tty.input.isRaw, false);
-    assert.ok(!tty.written().includes(TOKEN_A));
-  }
-});
-
-test("hidden input rejects redirection, invalid controls, and oversized input", async () => {
-  await assert.rejects(hiddenInput(terminal({ isTTY: false })), { code: "TTY_REQUIRED" });
-  for (const value of ["\u0000", "x".repeat(MAX_CREDENTIAL_LENGTH + 1)]) {
-    const tty = terminal();
-    const promise = hiddenInput(tty);
-    tty.send(value);
-    assert.equal(tty.input.isRaw, true, "invalid input must remain hidden until a boundary");
-    tty.send("\r");
-    await assert.rejects(promise, { code: "INVALID_JWT" });
-    assert.equal(tty.input.isRaw, false);
-  }
-});
-
 test("CLI help and rejected token arguments never initialize the store or echo args", async () => {
   for (const args of [[], ["--help"], ["set", TOKEN_A], ["clear", "--yes"], [TOKEN_A]]) {
     const tty = terminal({ isTTY: false });
@@ -319,15 +273,30 @@ test("CLI help and rejected token arguments never initialize the store or echo a
   }
 });
 
-test("CLI set requires a TTY and passes only hidden input to vault adapter", async () => {
-  const nonTTY = terminal({ isTTY: false });
-  assert.equal(await runCredentialCli(["set"], { ...nonTTY, storeFactory() { throw new Error("must not reach"); } }), 1);
-  const tty = terminal();
+test("CLI set receives only the secure-window adapter value and never reads terminal input", async () => {
+  const tty = terminal({ isTTY: false });
+  tty.input.on = tty.input.resume = tty.input.setRawMode = () => { throw new Error("stdin must not be read"); };
   let saved;
-  const result = runCredentialCli(["set"], { ...tty, storeFactory: () => ({ replace: async value => { saved = value; } }) });
-  tty.send(`${TOKEN_A}\r`);
-  assert.equal(await result, 0);
+  let prompted = 0;
+  const result = await runCredentialCli(["set"], { ...tty, prompt: async () => { prompted++; return TOKEN_A; }, storeFactory: () => ({ replace: async value => { saved = value; } }) });
+  assert.equal(result, 0);
+  assert.equal(prompted, 1);
   assert.equal(saved, TOKEN_A);
+  assert.ok(!tty.written().includes(TOKEN_A));
+});
+
+test("CLI never constructs a store for cancelled or invalid window input", async () => {
+  for (const answer of [TOKEN_A + "\r", TOKEN_A + "\n", "\u0000" + TOKEN_A, "\u0085" + TOKEN_A, "\u2028" + TOKEN_A, "x".repeat(MAX_CREDENTIAL_LENGTH + 1), null]) {
+    const tty = terminal();
+    let created = false;
+    const result = await runCredentialCli(["set"], { ...tty, prompt: async () => answer, storeFactory: () => { created = true; } });
+    assert.equal(result, 1);
+    assert.equal(created, false);
+    assert.ok(!tty.written().includes(TOKEN_A));
+  }
+  const tty = terminal();
+  const result = await runCredentialCli(["set"], { ...tty, prompt: async () => { throw Object.assign(new Error(TOKEN_A), { code: "CANCELLED" }); }, storeFactory() { throw new Error("must not reach"); } });
+  assert.equal(result, 130);
   assert.ok(!tty.written().includes(TOKEN_A));
 });
 
@@ -355,100 +324,31 @@ test("CLI recovery requires its own confirmation and never calls credential oper
 
 test("CLI sanitizes even adversarial raw storage error details", async () => {
   const tty = terminal();
-  const result = runCredentialCli(["set"], { ...tty, storeFactory: () => ({ replace: async () => { throw Object.assign(new Error(TOKEN_A), { code: TOKEN_A }); } }) });
+  const result = runCredentialCli(["set"], { ...tty, prompt: async () => TOKEN_A, storeFactory: () => ({ replace: async () => { throw Object.assign(new Error(TOKEN_A), { code: TOKEN_A }); } }) });
   tty.send(`${TOKEN_A}\r`);
   assert.equal(await result, 1);
   assert.ok(!tty.written().includes(TOKEN_A));
   assert.match(tty.written(), /No plaintext fallback/u);
 });
 
-test("actual CLI subprocess rejects piped setup without a native vault read", () => {
+test("actual CLI subprocess refuses unsupported-platform setup without a native vault read", { skip: process.platform === "win32" }, () => {
   const cliPath = path.join(__dirname, "../src/credential-cli.cjs");
   const result = spawnSync(process.execPath, [cliPath, "set"], { input: `${TOKEN_A}\n`, encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /interactive terminal/u);
+  assert.match(result.stderr, /unavailable on this platform/u);
   assert.ok(!result.stderr.includes(TOKEN_A));
 });
 
-
-test("bracketed paste wrappers and data are parsed safely at every split point", async () => {
-  const framed = `\u001b[200~${TOKEN_A}\u001b[201~`;
-  for (let split = 1; split < framed.length; split++) {
+test("nonsecret confirmation restores terminal state on completion and cancellation", async () => {
+  for (const cancel of [false, true]) {
     const tty = terminal();
-    const promise = hiddenInput(tty);
-    tty.send(framed.slice(0, split));
-    assert.equal(tty.input.isRaw, true, `raw mode after split ${split}`);
-    tty.send(framed.slice(split));
-    assert.equal(tty.input.isRaw, true, "valid paste waits for owner Enter");
-    tty.send("\r");
-    assert.equal(await promise, TOKEN_A);
-    assert.ok(!tty.written().includes(TOKEN_A));
+    const result = confirmationInput(tty);
+    tty.send("CLEAR");
+    if (cancel) { tty.signals.emit("SIGINT"); await assert.rejects(result, { code: "CANCELLED" }); }
+    else { tty.send("\r"); assert.equal(await result, "CLEAR"); }
+    assert.deepEqual(tty.input.rawModes, [true, false]);
+    assert.equal(tty.input.listenerCount("data"), 0);
   }
-  const tty = terminal();
-  const promise = hiddenInput(tty);
-  for (const character of framed) {
-    tty.send(character);
-    assert.equal(tty.input.isRaw, true);
-  }
-  tty.send("\r");
-  assert.equal(await promise, TOKEN_A);
-});
-
-test("oversized, control, multiline, and cancelled pastes drain their entire closing wrapper", async () => {
-  for (const [contents, code] of [
-    ["x".repeat(MAX_CREDENTIAL_LENGTH + 1), "INVALID_JWT"],
-    [`${TOKEN_A}\u0000${TOKEN_B}`, "INVALID_JWT"],
-    [`${TOKEN_A}\n${TOKEN_B}`, "INVALID_JWT"],
-    [`${TOKEN_A}\u0003${TOKEN_B}`, "CANCELLED"],
-    [`${TOKEN_A}\u0004${TOKEN_B}`, "CANCELLED"],
-    [`${TOKEN_A}\u001a${TOKEN_B}`, "CANCELLED"],
-    [`${TOKEN_A}\u001b[AX${TOKEN_B}`, "INVALID_JWT"]
-  ]) {
-    for (let split = 1; split < "\u001b[201~".length; split++) {
-      const tty = terminal();
-      const promise = hiddenInput(tty);
-      const rejection = assert.rejects(promise, { code });
-      tty.send("\u001b[200~");
-      tty.send(contents);
-      assert.equal(tty.input.isRaw, true, "paste failure must not re-enable terminal echo");
-      tty.send("\u001b[201~".slice(0, split));
-      assert.equal(tty.input.isRaw, true, "partial closing wrapper must remain hidden");
-      tty.send("\u001b[201~".slice(split));
-      await rejection;
-      assert.equal(tty.input.isRaw, false);
-      assert.ok(!tty.written().includes(TOKEN_A));
-      assert.ok(!tty.written().includes(TOKEN_B));
-    }
-  }
-});
-
-test("incomplete Escape and signals during a paste never prematurely restore echo", async () => {
-  const tty = terminal();
-  const promise = hiddenInput(tty);
-  const rejection = assert.rejects(promise, { code: "CANCELLED" });
-  tty.send("\u001b[20");
-  assert.equal(tty.input.isRaw, true);
-  tty.signals.emit("SIGINT");
-  assert.equal(tty.input.isRaw, true);
-  tty.send(`0~${TOKEN_A}`);
-  assert.equal(tty.input.isRaw, true);
-  tty.signals.emit("SIGTERM");
-  assert.equal(tty.input.isRaw, true);
-  tty.send("\u001b[201~");
-  await rejection;
-  assert.equal(tty.input.isRaw, false);
-  assert.ok(!tty.written().includes(TOKEN_A));
-});
-
-test("unknown split escape controls remain hidden until the owner submits or cancels", async () => {
-  const tty = terminal();
-  const promise = hiddenInput(tty);
-  tty.send("\u001b");
-  assert.equal(tty.input.isRaw, true);
-  tty.send(`[9bad${TOKEN_A}`);
-  assert.equal(tty.input.isRaw, true);
-  tty.send("\r");
-  await assert.rejects(promise, { code: "INVALID_JWT" });
-  assert.ok(!tty.written().includes(TOKEN_A));
+  await assert.rejects(confirmationInput(terminal({ isTTY: false })), { code: "TTY_REQUIRED" });
 });

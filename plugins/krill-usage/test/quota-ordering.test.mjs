@@ -27,10 +27,11 @@ const result = (view, entry = false) => ({ content: [], structuredContent: {
 
 // App responses go through request(), not merely through the entry callback.
 async function deliverPair(t, older, newer, newerIsEntry, newerFirst) {
-  let appResponse;
+  let appResponse = result({ ...older, stateRevision: 0, snapshotRevision: 0 });
   const controller = createController({ callTool: async () => appResponse });
   controller.connect();
   t.after(() => controller.dispose());
+  await controller.request('krill.read');
   const responses = [{ view: older, entry: !newerIsEntry }, { view: newer, entry: newerIsEntry }];
   if (newerFirst) responses.reverse();
   for (const { view, entry } of responses) {
@@ -177,7 +178,7 @@ for (const entry of [false, true]) {
     const controller = createController({ callTool: async () => response });
     controller.connect();
     t.after(() => controller.dispose());
-    controller.receive(response);
+    await controller.request('krill.read');
     const accepted = controller.state.payload.view;
     // A replay cannot replace quota data (or a local transport-error overlay),
     // even if it claims a later wall-clock success time or newer preferences.

@@ -7,7 +7,7 @@
   "interface": {
     "displayName": "Krill Usage",
     "shortDescription": "Krill 套餐额度与账户余额",
-    "longDescription": "本地运行的非官方 Krill 额度面板。包含手动刷新和非敏感设置；JWT 由用户在自己的本地终端写入操作系统凭据库。",
+    "longDescription": "本地运行的非官方 Krill 额度面板。包含手动刷新和非敏感设置；JWT 由用户通过 Windows 原生密码窗口写入操作系统凭据库。其他系统暂不支持新增凭据。",
     "developerName": "lengmh",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read"],

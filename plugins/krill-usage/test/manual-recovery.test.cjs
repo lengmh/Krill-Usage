@@ -74,8 +74,8 @@ test("confirmed manual recovery removes only empty or malformed locks, then set 
       assert.ok(!result.written.includes(TOKEN));
       if (contents.length > 1) assert.ok(!result.written.includes(contents));
       const tty = terminal();
-      const resultAfter = runCredentialCli([operation], { ...tty, storeFactory: () => f.store });
-      tty.send(`${operation === "set" ? "synthetic-new-credential" : "CLEAR"}\r`);
+      const resultAfter = runCredentialCli([operation], { ...tty, prompt: async () => "synthetic-new-credential", storeFactory: () => f.store });
+      if (operation === "clear") tty.send("CLEAR\r");
       assert.equal(await resultAfter, 0);
       assert.deepEqual(f.calls, ["construct", operation]);
       assert.equal(JSON.parse(fs.readFileSync(path.join(f.stateDir, REVISION_FILE), "utf8")).phase, "ready");

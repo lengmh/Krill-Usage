@@ -117,6 +117,7 @@ export function normalizePayload(payload = {}) {
     preferences: normalizePreferences(payload.preferences),
     preferencesRevision: Number.isSafeInteger(payload.preferencesRevision) && payload.preferencesRevision >= 0 ? payload.preferencesRevision : 0,
     view: {
+      instanceId: typeof view.instanceId === 'string' && view.instanceId.length > 0 && view.instanceId.length <= 128 ? view.instanceId : null,
       snapshot: view.snapshot && Array.isArray(view.snapshot.subscriptions) ? {
         creditBalance: view.snapshot.creditBalance ?? null,
         subscriptions: view.snapshot.subscriptions.filter((plan) => plan && typeof plan === 'object')
@@ -163,23 +164,43 @@ export function usageModel(payload, now = Date.now()) {
 }
 
 /** One in-flight request; explicit abort and generation checks guard late replies. */
-export function createController({ callTool, onChange = () => {}, initialPage = 'usage' }) {
+export function createController({ callTool, onChange = () => {}, initialPage = 'usage', isActive = () => true }) {
   const state = { payload: normalizePayload(), page: initialPage, connected: false, pending: null, notice: '', disposed: false };
   let inFlight = null;
   let aborter = null;
   let generation = 0;
   let entryReceived = false;
+  let readQueued = false;
+  let readScheduled = false;
   const emit = () => { if (!state.disposed) onChange(state); };
-  function receive(result, { entry = false } = {}) {
+  function drainRead() {
+    if (!readQueued || inFlight || state.disposed || !state.connected || !isActive()) return;
+    readQueued = false;
+    void request('krill.read');
+  }
+  function queueRead() {
+    // Wait for an owned request (especially a settings save), then check the
+    // current route once. Read responses themselves never enqueue another read.
+    readQueued = true;
+    if (readScheduled) return;
+    readScheduled = true;
+    Promise.resolve().then(() => { readScheduled = false; drainRead(); });
+  }
+  function accept(result, { entry = false, owned = false } = {}) {
     if (state.disposed || !result?.structuredContent?.view) return false;
     const payload = normalizePayload(result.structuredContent);
+    const instanceId = payload.view.instanceId;
+    const sameInstance = instanceId !== null && instanceId === state.payload.view.instanceId;
     // Account resets take precedence. Within an account, order every captured
     // view, including loading and failures, independently of success timestamps.
     // Equal captures are replays and must not replace already accepted state.
     const incomingRevision = payload.view.stateRevision;
     const currentRevision = state.payload.view.stateRevision;
-    if (incomingRevision > currentRevision || (incomingRevision === currentRevision &&
-        payload.view.snapshotRevision > state.payload.view.snapshotRevision)) {
+    const newerCapture = incomingRevision > currentRevision || (incomingRevision === currentRevision &&
+      payload.view.snapshotRevision > state.payload.view.snapshotRevision);
+    // Only a response to our current owned request identifies the routed backend.
+    // Unsolicited entry results may be delayed across a backend restart.
+    if (instanceId !== null && (sameInstance ? newerCapture : owned)) {
       state.payload.view = payload.view;
       state.payload.page = payload.page;
     }
@@ -193,12 +214,14 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
       state.page = payload.page;
       entryReceived = true;
     }
+    if (entry && instanceId !== null && !sameInstance) queueRead();
     emit();
-    return true;
+    return instanceId !== null;
   }
   function request(name, args = {}) {
     if (state.disposed || !state.connected) return Promise.resolve(false);
     if (inFlight) return inFlight;
+    if (name === 'krill.read') readQueued = false;
     const token = ++generation;
     const requestAborter = new AbortController();
     aborter = requestAborter;
@@ -210,7 +233,7 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
       return callTool({ name, arguments: args }, { signal: requestAborter.signal, timeout: 20000 });
     }).then((result) => {
       if (state.disposed || token !== generation) return false;
-      const accepted = receive(result);
+      const accepted = accept(result, { owned: true });
       if (!accepted || result.isError) {
         state.notice = name === 'krill.updateSettings' ? '设置未保存，请检查输入后重试。' : '暂时无法完成请求，请重试。';
         return false;
@@ -230,18 +253,19 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
         aborter = null;
         state.pending = null;
         emit();
+        drainRead();
       }
     });
     return inFlight;
   }
   return {
     state,
-    receive,
+    receive(result, { entry = false } = {}) { return accept(result, { entry }); },
     request,
     connect() { if (!state.disposed) { state.connected = true; emit(); } },
     navigate(page) { state.page = page === 'settings' ? 'settings' : 'usage'; state.notice = ''; emit(); },
     notify(message) { state.notice = message; emit(); },
-    abort() { generation += 1; aborter?.abort(); aborter = null; inFlight = null; state.pending = null; emit(); },
-    dispose() { state.disposed = true; state.connected = false; generation += 1; aborter?.abort(); aborter = null; inFlight = null; state.pending = null; }
+    abort() { generation += 1; readQueued = false; aborter?.abort(); aborter = null; inFlight = null; state.pending = null; emit(); },
+    dispose() { state.disposed = true; state.connected = false; generation += 1; readQueued = false; aborter?.abort(); aborter = null; inFlight = null; state.pending = null; }
   };
 }

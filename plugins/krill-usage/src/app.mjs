@@ -122,12 +122,12 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
       refreshDeadline = lastQuotaAttemptAt + refreshInterval;
     }
     return app.callServerTool(params, options);
-  }, onChange: render });
+  }, onChange: render, isActive: () => !suspended && doc.visibilityState !== 'hidden' });
 
   function createSetup() {
     const box = el('aside', 'setup-card');
-    box.append(el('h2', '', '本机凭证'), el('p', 'muted', '在你自己的终端中，进入插件目录并运行：'), el('code', 'setup-command', CREDENTIAL_COMMAND), el('p', 'setup-warning', '不要把 JWT 粘贴到聊天或设置中。'));
-    box.append(el('p', 'muted tiny', '更新凭证后，点击刷新或关闭并重新打开面板。'));
+    box.append(el('h2', '', '本机凭证'), el('p', 'muted', '在你自己的终端中，进入插件目录并运行以下命令，打开 Windows 原生凭据窗口：'), el('code', 'setup-command', CREDENTIAL_COMMAND), el('p', 'setup-warning', '只在原生窗口中输入 JWT，不要粘贴到终端、聊天或面板设置中。'));
+    box.append(el('p', 'muted tiny', '新增或替换凭证暂仅支持 Windows。更新后，点击刷新或关闭并重新打开面板。'));
     return box;
   }
 

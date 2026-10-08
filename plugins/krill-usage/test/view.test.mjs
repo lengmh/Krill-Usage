@@ -19,7 +19,7 @@ const plans = [
 const payload = (overrides = {}) => ({
   page: 'usage',
   preferences: { ...DEFAULT_PREFERENCES },
-  view: { snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, stateRevision: 1, snapshotRevision: 2, error: null, refreshMinutes: 3 },
+  view: { instanceId: 'view-test-service', snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, stateRevision: 1, snapshotRevision: 2, error: null, refreshMinutes: 3 },
   ...overrides
 });
 const result = (data = payload()) => ({ content: [], structuredContent: data });
@@ -103,8 +103,12 @@ test('preferences validate bounds, integer cadence, threshold ordering, and exac
 test('controller coalesces repeated refresh and does not navigate on app calls', async () => {
   const pending = deferred();
   const calls = [];
-  const controller = createController({ callTool: (...args) => { calls.push(args); return pending.promise; } });
+  const controller = createController({ callTool: (...args) => {
+    if (args[0].name === 'krill.read') return Promise.resolve(result());
+    calls.push(args); return pending.promise;
+  } });
   controller.connect();
+  await controller.request('krill.read');
   controller.receive(result(payload({ page: 'settings' })), { entry: true });
   const one = controller.request('krill.refresh');
   const two = controller.request('krill.refresh');
@@ -121,9 +125,12 @@ test('controller coalesces repeated refresh and does not navigate on app calls',
 });
 
 test('controller retains cached values on transport failure and rejects tool errors', async () => {
-  const controller = createController({ callTool: async () => { throw new Error('secret must never render'); } });
+  const controller = createController({ callTool: async ({ name }) => {
+    if (name === 'krill.read') return result();
+    throw new Error('secret must never render');
+  } });
   controller.connect();
-  controller.receive(result());
+  await controller.request('krill.read');
   assert.equal(await controller.request('krill.refresh'), false);
   assert.equal(controller.state.payload.view.snapshot.creditBalance, '23.95');
   assert.equal(controller.state.payload.view.error.code, 'TRANSPORT_ERROR');
@@ -136,9 +143,10 @@ test('controller retains cached values on transport failure and rejects tool err
   rejected.dispose();
 });
 
-test('late entry results follow capture revisions regardless of success timestamp', () => {
+test('late entry results follow capture revisions regardless of success timestamp', async () => {
   const controller = createController({ callTool: async () => result() });
-  controller.receive(result());
+  controller.connect();
+  await controller.request('krill.read');
   const older = payload({ page: 'settings' });
   older.view.snapshotRevision = 1;
   older.view.lastSuccessAt = now + 10000;
@@ -209,7 +217,10 @@ for (const transition of ['clear', 'switch', 'vault read failure', 'vault error 
       assert.ok(reset.stateRevision > cached.stateRevision);
       if (transition.startsWith('vault')) assert.equal(reset.error.code, 'SECRET_STORAGE');
       for (const resetFirst of [false, true]) {
-        const controller = createController({ callTool: async () => result() });
+        let response = result({ view: { ...cached, stateRevision: 0, snapshotRevision: 0 } });
+        const controller = createController({ callTool: async () => response });
+        controller.connect();
+        await controller.request('krill.read');
         try {
           const responses = [
             { view: cached, entry: !resetIsEntry },
@@ -217,7 +228,9 @@ for (const transition of ['clear', 'switch', 'vault read failure', 'vault error 
           ];
           if (resetFirst) responses.reverse();
           for (const { view, entry } of responses) {
-            controller.receive(result({ view, preferences: preferences.read(), page: entry ? 'settings' : 'usage' }), { entry });
+            response = result({ view, preferences: preferences.read(), page: entry ? 'settings' : 'usage' });
+            if (entry) controller.receive(response, { entry: true });
+            else await controller.request('krill.read');
           }
           assert.deepEqual(controller.state.payload.view, normalizePayload({ view: reset }).view,
             `reset delivered ${resetFirst ? 'first' : 'last'}`);
@@ -236,17 +249,23 @@ for (const resetIsEntry of [false, true]) {
     const preferences = { read: () => ({ ...DEFAULT_PREFERENCES }) };
     const service = new UsageService({ credentials, preferences, now: () => now,
       fetchUsage: async (jwt) => ({ creditBalance: jwt === 'synthetic-account-a' ? '100' : '200', subscriptions: [] }) });
-    const controller = createController({ callTool: async () => result() });
+    let response;
+    const controller = createController({ callTool: async () => response });
     t.after(() => { controller.dispose(); service.dispose(); });
-    await service.refresh();
+    response = result({ view: await service.refresh() });
+    controller.connect();
+    await controller.request('krill.read');
     account.revision = 'synthetic-revision-b';
     account.jwt = 'synthetic-account-b';
     const reset = await service.read();
     const refreshed = await service.refresh();
     assert.equal(reset.stateRevision, refreshed.stateRevision);
     assert.equal(refreshed.snapshot.creditBalance, '200');
-    controller.receive(result({ view: refreshed, page: !resetIsEntry ? 'settings' : 'usage' }), { entry: !resetIsEntry });
-    controller.receive(result({ view: reset, page: resetIsEntry ? 'settings' : 'usage' }), { entry: resetIsEntry });
+    for (const [view, entry] of [[refreshed, !resetIsEntry], [reset, resetIsEntry]]) {
+      response = result({ view, page: entry ? 'settings' : 'usage' });
+      if (entry) controller.receive(response, { entry: true });
+      else await controller.request('krill.read');
+    }
     assert.deepEqual(controller.state.payload.view, normalizePayload({ view: refreshed }).view);
     assert.equal(controller.state.page, 'settings');
   });

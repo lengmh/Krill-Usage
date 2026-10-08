@@ -1,7 +1,8 @@
 import { fetchSubscription } from './api.cjs';
+import { randomUUID } from 'node:crypto';
 
 const messages = {
-  NO_JWT: '尚未设置凭据，请在自己的本地终端完成账户设置。',
+  NO_JWT: '尚未设置凭据，请启动本机账户设置，在 Windows 原生窗口中输入凭据。',
   UNAUTHORIZED: '凭据无效或已过期，请重新设置。',
   CF_CHALLENGE: 'Krill 要求 Cloudflare 验证，请在浏览器中检查账户。',
   HTTP: 'Krill 请求失败，请稍后重试。', INVALID_JSON: 'Krill 返回了无法解析的数据。',
@@ -13,6 +14,7 @@ const messages = {
 export class UsageService {
   constructor({credentials, preferences, fetchUsage = fetchSubscription, now = Date.now}) {
     this.credentials = credentials; this.preferences = preferences; this.fetchUsage = fetchUsage; this.now = now;
+    this.instanceId = randomUUID();
     this.generation = 0; this.stateRevision = 0; this.snapshotRevision = 0;
     this.active = null; this.disposed = false; this.revision = undefined;
     this.reset();
@@ -29,7 +31,7 @@ export class UsageService {
     const refreshMinutes = this.preferences.read().refreshIntervalMinutes;
     // Stamp the capture here, before an async caller can delay delivery. Reads,
     // loading states and failures need ordering even without a new success time.
-    return { snapshot: this.snapshot, error: this.error, refreshing: Boolean(this.active),
+    return { instanceId: this.instanceId, snapshot: this.snapshot, error: this.error, refreshing: Boolean(this.active),
       snapshotRevision: ++this.snapshotRevision,
       lastSuccessAt: this.lastSuccessAt, stateRevision: this.stateRevision, authenticated: this.authenticated, refreshMinutes,
       stale: Boolean(this.snapshot && (this.error || this.now() - this.lastSuccessAt >= refreshMinutes * 60000)) };
