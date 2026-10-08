@@ -5,7 +5,7 @@ import { preferenceSchema } from './preferences.mjs';
 export const UI_URI = 'ui://krill-usage/dashboard-v1';
 export function createServer({service, preferences, html}) {
   const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.0'});
-  const readonly = {readOnlyHint:true, destructiveHint:false, openWorldHint:true};
+  const readonly = {readOnlyHint:true, destructiveHint:false, openWorldHint:false};
   const localRead = {...readonly, openWorldHint:false};
   const result = (view, page) => ({content:[], structuredContent:{...(page ? {page}:{}), view, preferences:preferences.read()}});
   const ui = (type) => ({ui:{resourceUri:UI_URI}, 'openai/ui':{entrypoints:[{type}]}});
