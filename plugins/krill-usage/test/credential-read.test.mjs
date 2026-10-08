@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, appendFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
+import { channel } from 'node:diagnostics_channel';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createCredentialStore, SERVICE, ACCOUNT, REVISION_FILE, READ_TIMEOUT_MS } from '../src/credentials.cjs';
@@ -24,7 +25,7 @@ const noSecret = error => {
 };
 async function until(predicate) {
   const deadline = Date.now() + 5_000;
-  while (!predicate()) {
+  while (!await predicate()) {
     assert.ok(Date.now() < deadline, 'synthetic child did not reach the expected state');
     await delay(10);
   }
@@ -42,9 +43,27 @@ function fixture(t, { mockResolve = true } = {}) {
   const eventsPath = path.join(dir, 'events.jsonl');
   const modulePath = path.join(dir, 'keyring.cjs');
   writeFileSync(modulePath, `module.exports = require(${JSON.stringify(fixtureModule)})(${JSON.stringify(controlPath)}, ${JSON.stringify(eventsPath)});\n`);
-  const control = values => writeFileSync(controlPath, JSON.stringify(values));
+  const control = values => {
+    writeFileSync(controlPath + '.tmp', JSON.stringify(values));
+    renameSync(controlPath + '.tmp', controlPath);
+  };
   control({ mode: 'success' });
-  const events = () => { try { return readFileSync(eventsPath, 'utf8').trim().split('\n').map(JSON.parse); } catch (error) { if (error.code === 'ENOENT') return []; throw error; } };
+  const events = () => {
+    try {
+      const text = readFileSync(eventsPath, 'utf8');
+      // Another process may still be appending the final record. Only consume
+      // newline-terminated records, including when the file is initially empty.
+      return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map(JSON.parse);
+    } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  };
+  const children = [];
+  const processes = channel('child_process');
+  const observe = ({ process: child }) => {
+    const observed = { child, closed: false };
+    children.push(observed);
+    child.once('close', () => { observed.closed = true; });
+  };
+  processes.subscribe(observe);
   let resolutions = 0;
   if (mockResolve) {
     const resolve = Module._resolveFilename;
@@ -54,11 +73,38 @@ function fixture(t, { mockResolve = true } = {}) {
     });
   }
   const store = createCredentialStore({ stateDir });
-  t.after(() => { store.dispose(); rmSync(dir, { recursive: true, force: true }); });
-  return { dir, stateDir, modulePath, store, control, events, resolutions: () => resolutions,
-    async exited() { await until(() => events().every(event => !alive(event.pid))); }
+  let beforeCleanup = () => {};
+  t.after(async () => {
+    try { await beforeCleanup(); }
+    finally {
+      store.dispose();
+      for (const { child, closed } of children) if (!closed) { try { child.kill('SIGKILL'); } catch {} }
+      try { await until(() => children.every(child => child.closed)); }
+      finally { processes.unsubscribe(observe); rmSync(dir, { recursive: true, force: true }); }
+    }
+  });
+  return { dir, stateDir, modulePath, eventsPath, store, control, events, resolutions: () => resolutions,
+    cleanup(callback) { beforeCleanup = callback; },
+    async exited() {
+      await until(() => events().every(event => !alive(event.pid)));
+      // OS process death can precede Node's close event, especially on Windows.
+      // The production adapter intentionally refuses retries until close.
+      if (mockResolve) await until(() => children.every(child => child.closed));
+    }
   };
 }
+
+test('fixture event reader waits for complete append records', t => {
+  const f = fixture(t);
+  writeFileSync(f.eventsPath, '');
+  assert.deepEqual(f.events(), []);
+  appendFileSync(f.eventsPath, '{"event":"read"');
+  assert.deepEqual(f.events(), []);
+  appendFileSync(f.eventsPath, '}\n{"event":');
+  assert.deepEqual(f.events(), [{ event: 'read' }]);
+  appendFileSync(f.eventsPath, '"close"}\n');
+  assert.deepEqual(f.events(), [{ event: 'read' }, { event: 'close' }]);
+});
 
 test('default binding lazily selects isolated AsyncEntry with durable fixed entry and cleans its deadline', async t => {
   const f = fixture(t);
@@ -92,7 +138,7 @@ for (const mode of ['constructor-block', 'read-block', 'never', 'late', 'exit-bl
     const service = new UsageService({ credentials: f.store, preferences,
       fetchUsage: async jwt => { requests.push(jwt); return { creditBalance: '200', subscriptions: [] }; }
     });
-    t.after(() => service.dispose());
+    f.cleanup(() => service.dispose());
     f.control({ mode });
     const first = service.refresh();
     assert.equal(service.refresh(), first);
@@ -170,6 +216,7 @@ test('service disposal terminates a blocked child and releases its pending read'
   const service = new UsageService({ credentials: f.store, preferences: createPreferences(f.stateDir),
     fetchUsage: async () => { throw new Error('must not request usage'); }
   });
+  f.cleanup(() => service.dispose());
   const pending = service.refresh();
   await until(() => f.events().length > 0);
   service.dispose();
@@ -199,7 +246,9 @@ test('packaged MCP stays responsive during a blocked default vault read and reco
   });
   let stderr = '';
   transport.stderr?.on('data', data => { stderr += data; });
-  t.after(async () => { await client.close(); await transport.close(); });
+  // Close the server before removing its cwd. Separate after hooks stop at the
+  // first error, which previously stranded the MCP process on Windows failures.
+  f.cleanup(async () => { try { await client.close(); } finally { await transport.close(); } });
   await client.connect(transport);
   const first = client.callTool({ name: 'krill.usage', arguments: {} });
   await until(() => f.events().length > 0);
@@ -217,7 +266,15 @@ test('packaged MCP stays responsive during a blocked default vault read and reco
   // An absent synthetic credential proves the retry reaches the next default
   // child without ever making a real Krill network request.
   f.control({ mode: 'success', value: null });
-  const recovered = await client.callTool({ name: 'krill.refresh', arguments: {} });
+  let recovered;
+  await until(async () => {
+    recovered = await client.callTool({ name: 'krill.refresh', arguments: {} });
+    if (recovered.structuredContent.view.error.code !== 'SECRET_STORAGE') return true;
+    // Only the existing child's close barrier may delay retry. A newly started
+    // helper failing is a real failure, not a reason to retry the test.
+    assert.equal(f.events().filter(event => event.event === 'construct').length, 1);
+    return false;
+  });
   assert.equal(recovered.structuredContent.view.error.code, 'NO_JWT');
   assert.equal(f.events().filter(event => event.event === 'construct').length, 2);
   assert.equal(stderr, '');
