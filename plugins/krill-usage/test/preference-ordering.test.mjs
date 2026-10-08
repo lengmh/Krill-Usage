@@ -163,6 +163,7 @@ for (const mode of ['app save', 'native settings.update then krill.read']) {
     const current = f.mounted.controller.state.payload;
     assert.equal(current.view.stateRevision, f.opening.structuredContent.view.stateRevision);
     assert.equal(current.view.lastSuccessAt, f.opening.structuredContent.view.lastSuccessAt);
+    assert.ok(current.view.snapshotRevision > f.opening.structuredContent.view.snapshotRevision);
     assert.ok(current.preferencesRevision > f.opening.structuredContent.preferencesRevision);
     const revision = current.preferencesRevision, disk = f.disk();
     assertPreferences(f, saved);
@@ -200,6 +201,24 @@ for (const trigger of ['manual', 'scheduled']) {
 }
 
 for (const delivery of ['quota first', 'preferences first']) {
+  test(`newer failed quota and older quota carrying newer preferences merge independently: ${delivery}`, async t => {
+    const f = await fixture(t);
+    const delayed = await f.holdRead();
+    f.failFetch();
+    const failed = await f.call('krill.refresh');
+    await f.call('settings.update', { set: changed });
+    const prefs = await delayed.finish();
+    assert.equal(failed.structuredContent.view.stateRevision, prefs.structuredContent.view.stateRevision);
+    assert.equal(failed.structuredContent.view.lastSuccessAt, prefs.structuredContent.view.lastSuccessAt);
+    assert.ok(failed.structuredContent.view.snapshotRevision > prefs.structuredContent.view.snapshotRevision);
+    assert.ok(failed.structuredContent.preferencesRevision < prefs.structuredContent.preferencesRevision);
+    for (const response of delivery === 'quota first' ? [failed, prefs] : [prefs, failed]) f.app.ontoolresult(response);
+    assert.deepEqual(f.mounted.controller.state.payload.view, failed.structuredContent.view);
+    assertPreferences(f, changed);
+    assert.equal(f.doc.querySelector('.sync-label').textContent, '刷新失败 · 保留上次数据');
+    assert.equal(f.doc.querySelector('.error-detail').hidden, false);
+  });
+
   test(`newer same-account quota and newer preferences merge independently: ${delivery}`, async t => {
     const f = await fixture(t);
     const delayed = await f.holdRead();
@@ -208,7 +227,8 @@ for (const delivery of ['quota first', 'preferences first']) {
     await f.call('settings.update', { set: changed });
     const prefs = await delayed.finish();
     assert.equal(quota.structuredContent.view.stateRevision, prefs.structuredContent.view.stateRevision);
-    assert.ok(quota.structuredContent.view.lastSuccessAt > prefs.structuredContent.view.lastSuccessAt);
+    assert.ok(quota.structuredContent.view.snapshotRevision > prefs.structuredContent.view.snapshotRevision,
+      'quota revision is assigned when captured, before a delayed result wrapper');
     assert.ok(quota.structuredContent.preferencesRevision < prefs.structuredContent.preferencesRevision);
     for (const response of delivery === 'quota first' ? [quota, prefs] : [prefs, quota]) f.app.ontoolresult(response);
     assert.deepEqual(f.mounted.controller.state.payload.view, quota.structuredContent.view,

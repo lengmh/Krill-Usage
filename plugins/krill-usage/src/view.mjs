@@ -118,6 +118,7 @@ export function normalizePayload(payload = {}) {
       refreshing: view.refreshing === true,
       lastSuccessAt: numberOrNull(view.lastSuccessAt) ?? 0,
       stateRevision: Number.isSafeInteger(view.stateRevision) && view.stateRevision >= 0 ? view.stateRevision : 0,
+      snapshotRevision: Number.isSafeInteger(view.snapshotRevision) && view.snapshotRevision >= 0 ? view.snapshotRevision : 0,
       authenticated: view.authenticated === true,
       stale: view.stale === true,
       refreshMinutes: numberOrNull(view.refreshMinutes) ?? 3
@@ -165,12 +166,13 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
   function receive(result, { entry = false } = {}) {
     if (state.disposed || !result?.structuredContent?.view) return false;
     const payload = normalizePayload(result.structuredContent);
-    // Resets outrank older account data in either delivery order. Within the
-    // same revision, preserve the newest successful snapshot on both channels.
+    // Account resets take precedence. Within an account, order every captured
+    // view, including loading and failures, independently of success timestamps.
+    // Equal captures are replays and must not replace already accepted state.
     const incomingRevision = payload.view.stateRevision;
     const currentRevision = state.payload.view.stateRevision;
     if (incomingRevision > currentRevision || (incomingRevision === currentRevision &&
-        payload.view.lastSuccessAt >= state.payload.view.lastSuccessAt)) {
+        payload.view.snapshotRevision > state.payload.view.snapshotRevision)) {
       state.payload.view = payload.view;
       state.payload.page = payload.page;
     }

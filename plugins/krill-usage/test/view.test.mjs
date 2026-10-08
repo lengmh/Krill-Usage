@@ -19,7 +19,7 @@ const plans = [
 const payload = (overrides = {}) => ({
   page: 'usage',
   preferences: { ...DEFAULT_PREFERENCES },
-  view: { snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, stateRevision: 1, error: null, refreshMinutes: 3 },
+  view: { snapshot: { creditBalance: '23.95', subscriptions: plans }, authenticated: true, refreshing: false, stale: false, lastSuccessAt: now, stateRevision: 1, snapshotRevision: 2, error: null, refreshMinutes: 3 },
   ...overrides
 });
 const result = (data = payload()) => ({ content: [], structuredContent: data });
@@ -131,17 +131,19 @@ test('controller retains cached values on transport failure and rejects tool err
   rejected.dispose();
 });
 
-test('late entry results preserve newer cache but accept newer initial GET', () => {
+test('late entry results follow capture revisions regardless of success timestamp', () => {
   const controller = createController({ callTool: async () => result() });
   controller.receive(result());
   const older = payload({ page: 'settings' });
-  older.view.lastSuccessAt = now - 10000;
+  older.view.snapshotRevision = 1;
+  older.view.lastSuccessAt = now + 10000;
   older.view.snapshot.creditBalance = '1';
   controller.receive(result(older), { entry: true });
   assert.equal(controller.state.page, 'settings');
   assert.equal(controller.state.payload.view.snapshot.creditBalance, '23.95');
   const newer = payload();
-  newer.view.lastSuccessAt = now + 1000;
+  newer.view.snapshotRevision = 3;
+  newer.view.lastSuccessAt = now - 1000;
   newer.view.snapshot.creditBalance = '9';
   controller.receive(result(newer), { entry: true });
   assert.equal(controller.state.payload.view.snapshot.creditBalance, '9');
@@ -153,6 +155,13 @@ test('payload state revisions accept only nonnegative safe integers', () => {
     assert.equal(normalizePayload({ view: { stateRevision } }).view.stateRevision, 0);
   }
   assert.equal(normalizePayload({ view: { stateRevision: 2 } }).view.stateRevision, 2);
+});
+
+test('payload snapshot revisions accept only nonnegative safe integers', () => {
+  for (const snapshotRevision of [undefined, null, '2', -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(normalizePayload({ view: { snapshotRevision } }).view.snapshotRevision, 0);
+  }
+  assert.equal(normalizePayload({ view: { snapshotRevision: 2 } }).view.snapshotRevision, 2);
 });
 
 test('payload preference revisions accept only nonnegative safe integers', () => {

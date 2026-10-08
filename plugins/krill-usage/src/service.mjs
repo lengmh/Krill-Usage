@@ -13,7 +13,8 @@ const messages = {
 export class UsageService {
   constructor({credentials, preferences, fetchUsage = fetchSubscription, now = Date.now}) {
     this.credentials = credentials; this.preferences = preferences; this.fetchUsage = fetchUsage; this.now = now;
-    this.generation = 0; this.stateRevision = 0; this.active = null; this.disposed = false; this.revision = undefined;
+    this.generation = 0; this.stateRevision = 0; this.snapshotRevision = 0;
+    this.active = null; this.disposed = false; this.revision = undefined;
     this.reset();
     this.subscription = credentials.onDidChange?.(() => this.invalidate());
   }
@@ -26,7 +27,10 @@ export class UsageService {
   }
   view() {
     const refreshMinutes = this.preferences.read().refreshIntervalMinutes;
+    // Stamp the capture here, before an async caller can delay delivery. Reads,
+    // loading states and failures need ordering even without a new success time.
     return { snapshot: this.snapshot, error: this.error, refreshing: Boolean(this.active),
+      snapshotRevision: ++this.snapshotRevision,
       lastSuccessAt: this.lastSuccessAt, stateRevision: this.stateRevision, authenticated: this.authenticated, refreshMinutes,
       stale: Boolean(this.snapshot && (this.error || this.now() - this.lastSuccessAt >= refreshMinutes * 60000)) };
   }
