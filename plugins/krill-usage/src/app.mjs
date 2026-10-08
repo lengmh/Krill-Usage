@@ -103,13 +103,14 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
   shell.append(header, nav, notice, usage, settings, footer);
   root.replaceChildren(shell);
 
-  let dirty = false;
+  const dirtyFields = new Map();
   let disposed = false;
   let suspended = false;
   let refreshTimer = null;
   let armedRefreshDeadline = null;
   let tickTimer = null;
   let settingsEditVersion = 0;
+  let settingsRequestVersion = 0;
   // Activation supplies the initial baseline. Only a dispatched quota attempt
   // advances it; reads, saves, result delivery, and pre-dispatch aborts do not.
   let lastQuotaAttemptAt = Date.now();
@@ -191,13 +192,12 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
     empty.replaceChildren(el('h2', '', model.view.snapshot ? '暂无套餐' : '还没有额度数据'), el('p', 'muted', model.view.snapshot ? '账户余额已显示在上方。' : model.view.error ? '请检查本机凭证和网络，然后重试。' : '点击刷新，查询套餐额度和账户余额。'));
     setupUsage.hidden = model.view.authenticated;
     setupSettings.querySelector('h2').textContent = model.view.authenticated ? '本机凭证 · 已配置' : model.view.error?.code === 'NO_JWT' ? '本机凭证 · 未配置' : '本机凭证 · 待验证';
-    if (!dirty) {
-      for (const [name, input] of Object.entries(inputs)) {
-        if (input.type === 'checkbox') input.checked = model.preferences[name];
-        else input.value = String(model.preferences[name]);
-      }
+    for (const [name, input] of Object.entries(inputs)) {
+      if (dirtyFields.has(name)) continue;
+      if (input.type === 'checkbox') input.checked = model.preferences[name];
+      else input.value = String(model.preferences[name]);
     }
-    save.disabled = !state.connected || busy || !dirty;
+    save.disabled = !state.connected || busy || dirtyFields.size === 0;
     reload.disabled = !state.connected || busy;
     save.textContent = state.pending === 'krill.updateSettings' ? '保存中…' : '保存设置';
     footerText.textContent = doc.visibilityState === 'hidden' ? '自动刷新已暂停' : `每 ${model.preferences.refreshIntervalMinutes} 分钟刷新 · 仅面板可见时`;
@@ -295,34 +295,49 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
   refresh.addEventListener('click', () => void request('krill.refresh'));
   usageNav.addEventListener('click', () => controller.navigate('usage'));
   settingsNav.addEventListener('click', () => controller.navigate('settings'));
-  form.addEventListener('input', () => {
-    dirty = true;
-    settingsEditVersion += 1;
+  // Keep raw edits per field. Unedited controls can follow newer accepted
+  // preferences without silently becoming part of a stale panel's next save.
+  function clearUnchangedEdits(submitted) {
+    for (const [name, version] of submitted) {
+      if (dirtyFields.get(name) === version) dirtyFields.delete(name);
+    }
+  }
+  form.addEventListener('input', (event) => {
+    const name = event.target?.id;
+    if (!Object.hasOwn(inputs, name) || inputs[name] !== event.target) return;
+    dirtyFields.set(name, ++settingsEditVersion);
     formStatus.textContent = '尚未保存';
     save.disabled = !controller.state.connected || Boolean(controller.state.pending);
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (controller.state.pending || disposed) return;
-    const values = Object.fromEntries(Object.entries(inputs).map(([name, input]) => [name, input.type === 'checkbox' ? input.checked : input.value]));
+    if (controller.state.pending || disposed || dirtyFields.size === 0) return;
+    const submitted = new Map(dirtyFields);
+    const values = Object.fromEntries([...submitted.keys()].map(name => {
+      const input = inputs[name];
+      return [name, input.type === 'checkbox' ? input.checked : input.value];
+    }));
     const result = validatePreferences(values);
     if (result.error) { formStatus.textContent = result.error; return; }
-    const editVersion = settingsEditVersion;
-    if (await request('krill.updateSettings', { set: result.set })) {
-      if (disposed) return;
-      if (editVersion === settingsEditVersion) dirty = false;
-      formStatus.textContent = dirty ? '已保存；还有新的修改待保存。' : '设置已保存';
+    const requestVersion = ++settingsRequestVersion;
+    const saved = await request('krill.updateSettings', { set: result.set });
+    // An aborted request may settle after a newer save/reload has completed.
+    if (disposed || requestVersion !== settingsRequestVersion) return;
+    if (saved) {
+      clearUnchangedEdits(submitted);
+      formStatus.textContent = dirtyFields.size ? '已保存；还有新的修改待保存。' : '设置已保存';
       render();
-    } else if (!disposed) formStatus.textContent = controller.state.notice || '保存结果尚未确认，请重新加载后检查。';
+    } else formStatus.textContent = controller.state.notice || '保存结果尚未确认，请重新加载后检查。';
   });
   reload.addEventListener('click', async () => {
-    const editVersion = settingsEditVersion;
-    if (await request('krill.read')) {
-      if (disposed) return;
-      if (editVersion === settingsEditVersion) {
-        dirty = false;
-        formStatus.textContent = '已重新加载本机设置';
-      } else formStatus.textContent = '保留了刚刚输入的修改。';
+    if (controller.state.pending || disposed) return;
+    const previousEdits = new Map(dirtyFields);
+    const requestVersion = ++settingsRequestVersion;
+    const loaded = await request('krill.read');
+    if (disposed || requestVersion !== settingsRequestVersion) return;
+    if (loaded) {
+      clearUnchangedEdits(previousEdits);
+      formStatus.textContent = dirtyFields.size ? '保留了刚刚输入的修改。' : '已重新加载本机设置';
       render();
     }
   });

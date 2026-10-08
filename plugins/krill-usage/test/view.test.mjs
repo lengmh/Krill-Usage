@@ -92,6 +92,11 @@ test('preferences validate bounds, integer cadence, threshold ordering, and exac
   assert.equal(valid.set.refreshIntervalMinutes, 1);
   assert.equal(valid.set.lowQuotaCriticalPercent, 2.5);
   assert.equal(Object.hasOwn(valid.set, 'token'), false);
+  assert.deepEqual(validatePreferences({ lowQuotaCriticalPercent: '20' }), { set: { lowQuotaCriticalPercent: 20 } });
+  assert.deepEqual(validatePreferences({ lowQuotaWarningPercent: '2' }), { set: { lowQuotaWarningPercent: 2 } });
+  assert.deepEqual(validatePreferences({ showBalance: false, token: 'must not travel' }), { set: { showBalance: false } });
+  assert.ok(validatePreferences({ showBalance: 'false' }).error);
+  assert.deepEqual(validatePreferences({}), { set: {} });
   assert.equal(normalizePreferences({ refreshIntervalMinutes: 600 }).refreshIntervalMinutes, 3);
 });
 
@@ -371,7 +376,7 @@ test('settings save uses exact allowlist and reload preserves current page', asy
     await flush();
     const saved = ui.calls.find((call) => call.params.name === 'krill.updateSettings');
     assert.deepEqual(Object.keys(saved.params.arguments), ['set']);
-    assert.deepEqual(Object.keys(saved.params.arguments.set).sort(), Object.keys(DEFAULT_PREFERENCES).sort());
+    assert.deepEqual(saved.params.arguments.set, { refreshIntervalMinutes: 5 });
     assert.equal(saved.params.arguments.set.refreshIntervalMinutes, 5);
     assert.equal(ui.doc.querySelector('.form-status').textContent, '设置已保存');
     ui.doc.querySelector('.quiet-button').click();

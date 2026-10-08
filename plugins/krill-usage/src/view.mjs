@@ -93,13 +93,20 @@ export function validatePreferences(values) {
     ['lowQuotaWarningPercent', 0, 100, '低额度提醒'],
     ['lowQuotaCriticalPercent', 0, 100, '紧急提醒']
   ]) {
+    if (!Object.hasOwn(values, key)) continue;
     const value = numberOrNull(values[key]);
     if (value === null || value < min || value > max) return { error: `${title}需在 ${min}–${max} 之间。` };
     if (key === 'refreshIntervalMinutes' && !Number.isInteger(value)) return { error: '刷新间隔需为 1–60 之间的整数。' };
     set[key] = value;
   }
-  if (set.lowQuotaCriticalPercent > set.lowQuotaWarningPercent) return { error: '紧急提醒不能高于低额度提醒。' };
-  set.showBalance = Boolean(values.showBalance);
+  // A partial patch is merged with current disk values under the server lock.
+  // Do not compare a changed threshold with an untouched, possibly stale field.
+  if (Object.hasOwn(set, 'lowQuotaCriticalPercent') && Object.hasOwn(set, 'lowQuotaWarningPercent') &&
+      set.lowQuotaCriticalPercent > set.lowQuotaWarningPercent) return { error: '紧急提醒不能高于低额度提醒。' };
+  if (Object.hasOwn(values, 'showBalance')) {
+    if (typeof values.showBalance !== 'boolean') return { error: '请选择是否显示账户余额。' };
+    set.showBalance = values.showBalance;
+  }
   return { set };
 }
 

@@ -40,7 +40,12 @@ export class UsageService {
     try {
       const revision = await this.credentials.readRevision();
       if (generation !== this.generation) return this.view();
-      if (revision !== this.revision) { this.invalidate(); this.revision = revision; }
+      if (revision !== this.revision) {
+        // Learning the first marker is not an account change. A refresh may
+        // already own this generation while both initial reads are pending.
+        if (this.revision !== undefined) this.invalidate();
+        this.revision = revision;
+      }
     } catch {
       if (generation === this.generation) { this.invalidate(); this.error = this.safeError({code:'SECRET_STORAGE'}); }
     }

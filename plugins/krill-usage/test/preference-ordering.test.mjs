@@ -174,7 +174,7 @@ for (const mode of ['app save', 'native settings.update then krill.read']) {
     assert.deepEqual(f.preferences.read(), saved);
     await f.save({ lowQuotaWarningPercent: 25 });
     const edited = { ...saved, lowQuotaWarningPercent: 25 };
-    assert.deepEqual(f.appCalls.at(-1).arguments.set, edited, 'unchanged form fields retain saved values');
+    assert.deepEqual(f.appCalls.at(-1).arguments.set, { lowQuotaWarningPercent: 25 }, 'only the edited field is submitted');
     assert.deepEqual(f.preferences.read(), edited, 'later deliberate save cannot restore obsolete values');
     f.app.ontoolresult(f.opening);
     assertPreferences(f, edited);
