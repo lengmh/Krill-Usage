@@ -7,7 +7,10 @@ export function createServer({service, preferences, html}) {
   const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.0'});
   const readonly = {readOnlyHint:true, destructiveHint:false, openWorldHint:false};
   const localRead = {...readonly, openWorldHint:false};
-  const result = (view, page) => ({content:[], structuredContent:{...(page ? {page}:{}), view, preferences:preferences.read()}});
+  const result = (view, page) => {
+    const {revision, values} = preferences.readSnapshot();
+    return {content:[], structuredContent:{...(page ? {page}:{}), view, preferences:values, preferencesRevision:revision}};
+  };
   const ui = (type) => ({ui:{resourceUri:UI_URI}, 'openai/ui':{entrypoints:[{type}]}});
   const fields = {
     refreshIntervalMinutes:{schema:preferenceSchema.shape.refreshIntervalMinutes,title:'刷新间隔（分钟）'},

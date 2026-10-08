@@ -155,6 +155,13 @@ test('payload state revisions accept only nonnegative safe integers', () => {
   assert.equal(normalizePayload({ view: { stateRevision: 2 } }).view.stateRevision, 2);
 });
 
+test('payload preference revisions accept only nonnegative safe integers', () => {
+  for (const preferencesRevision of [undefined, null, '2', -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(normalizePayload({ preferencesRevision }).preferencesRevision, 0);
+  }
+  assert.equal(normalizePayload({ preferencesRevision: 2 }).preferencesRevision, 2);
+});
+
 for (const transition of ['clear', 'switch', 'vault read failure', 'vault error recheck failure']) {
   for (const resetIsEntry of [false, true]) {
     test(`${transition}: reset and cached results stay ordered when reset is ${resetIsEntry ? 'entry' : 'app'} response`, async (t) => {

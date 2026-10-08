@@ -2,6 +2,7 @@
 import { mountKrillApp } from '../../src/app.mjs';
 const initialTime = Date.now();
 let preferences = { refreshIntervalMinutes: 3, showBalance: true, lowQuotaWarningPercent: 15, lowQuotaCriticalPercent: 5 };
+let preferencesRevision = 0;
 const sample = {
   creditBalance: '23.95',
   subscriptions: [
@@ -15,7 +16,7 @@ const query = new URLSearchParams(location.search);
 const initialPage = query.get('page') === 'settings' ? 'settings' : 'usage';
 const theme = query.get('theme') === 'dark' ? 'dark' : 'light';
 const calls = [];
-const response = () => ({ content: [], structuredContent: { page: initialPage, view: structuredClone(view), preferences: { ...preferences } } });
+const response = () => ({ content: [], structuredContent: { page: initialPage, view: structuredClone(view), preferences: { ...preferences }, preferencesRevision } });
 const app = {
   connect: async () => {},
   getHostContext: () => ({ theme }),
@@ -24,6 +25,7 @@ const app = {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (params.name === 'krill.updateSettings') {
       preferences = { ...preferences, ...params.arguments.set };
+      preferencesRevision++;
       view.refreshMinutes = preferences.refreshIntervalMinutes;
     }
     if (params.name === 'krill.refresh') {

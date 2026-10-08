@@ -1,14 +1,78 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,mkdirSync,readdirSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';
 import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {setTimeout as delay} from 'node:timers/promises';
 import {createPreferences,defaults} from '../src/preferences.mjs';
 test('persists only allowlisted nonsecret settings with numeric bounds',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'krill-prefs-'));try{
  const prefs=createPreferences(dir);assert.deepEqual(prefs.read(),defaults);
+ assert.deepEqual(prefs.readSnapshot(),{revision:0,values:defaults});
  prefs.update({refreshIntervalMinutes:5,showBalance:false});assert.equal(createPreferences(dir).read().showBalance,false);
  assert.throws(()=>prefs.update({jwt:'synthetic'}));assert.throws(()=>prefs.update({refreshIntervalMinutes:0}));assert.throws(()=>prefs.update({refreshIntervalMinutes:1.2}));
+ assert.throws(()=>prefs.update({revision:50}));assert.throws(()=>prefs.update({preferencesRevision:50}));
  assert.ok(!readFileSync(path.join(dir,'preferences.json'),'utf8').includes('synthetic'));
  assert.equal(prefs.read().lowQuotaWarningPercent,15);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('legacy flat preferences migrate on save without changing public values',()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'krill-prefs-'));try{
+ const file=path.join(dir,'preferences.json'),legacy=JSON.stringify({showBalance:false,refreshIntervalMinutes:7});
+ writeFileSync(file,legacy);
+ const prefs=createPreferences(dir),values={...defaults,showBalance:false,refreshIntervalMinutes:7};
+ assert.deepEqual(prefs.readSnapshot(),{revision:0,values});assert.equal(readFileSync(file,'utf8'),legacy);
+ assert.deepEqual(prefs.read(),values);
+ const updated=prefs.update({lowQuotaWarningPercent:30});
+ assert.deepEqual(updated,{...values,lowQuotaWarningPercent:30});
+ assert.deepEqual(JSON.parse(readFileSync(file,'utf8')),{revision:1,values:updated});
+ const restarted=createPreferences(dir);
+ assert.deepEqual(restarted.readSnapshot(),{revision:1,values:updated});
+ assert.deepEqual(restarted.update({showBalance:true}),{...updated,showBalance:true});
+ assert.equal(prefs.readSnapshot().revision,2);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('preference snapshots pair revision and values from the same file read',t=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'krill-prefs-'));try{
+ const prefs=createPreferences(dir),file=path.join(dir,'preferences.json');
+ prefs.update({showBalance:false});const first=prefs.readSnapshot();
+ const second={revision:2,values:{...first.values,refreshIntervalMinutes:7}};
+ const original=fs.readFileSync;let reads=0;
+ t.mock.method(fs,'readFileSync',function(target,...args){
+  const contents=original(target,...args);
+  if(target===file){reads++;writeFileSync(file,JSON.stringify(second));}
+  return contents;
+ });
+ assert.deepEqual(prefs.readSnapshot(),first);assert.equal(reads,1);
+ assert.deepEqual(prefs.readSnapshot(),second);
+ }finally{t.mock.restoreAll();rmSync(dir,{recursive:true,force:true});}
+});
+test('invalid or exhausted stored revisions fail closed without overwriting settings',()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'krill-prefs-'));try{
+ const prefs=createPreferences(dir),file=path.join(dir,'preferences.json');
+ for(const revision of [-1,1.5,'2',Number.MAX_SAFE_INTEGER+1]){
+  const contents=JSON.stringify({revision,values:defaults});writeFileSync(file,contents);
+  assert.throws(()=>prefs.readSnapshot(),/Unable to load/);
+  assert.throws(()=>prefs.update({showBalance:false}),/Unable to save/);
+  assert.equal(readFileSync(file,'utf8'),contents);
+ }
+ const contents=JSON.stringify({revision:Number.MAX_SAFE_INTEGER,values:defaults});writeFileSync(file,contents);
+ assert.equal(prefs.readSnapshot().revision,Number.MAX_SAFE_INTEGER);
+ assert.throws(()=>prefs.update({showBalance:false}),/Unable to save/);
+ assert.equal(readFileSync(file,'utf8'),contents);
+ assert.deepEqual(readdirSync(dir),['preferences.json']);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('malformed legacy files and snapshot envelopes fail closed',()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'krill-prefs-'));try{
+ const prefs=createPreferences(dir),file=path.join(dir,'preferences.json');
+ for(const saved of [false,0,[],null,'settings',{revision:1},{values:defaults},
+  {revision:1,values:{showBalance:false}},{revision:1,values:defaults,jwt:'synthetic'},
+  {revision:1,values:{...defaults,refreshIntervalMinutes:0}}]){
+  const contents=JSON.stringify(saved);writeFileSync(file,contents);
+  assert.throws(()=>prefs.readSnapshot(),/Unable to load/);
+  assert.throws(()=>prefs.update({showBalance:false}),/Unable to save/);
+  assert.equal(readFileSync(file,'utf8'),contents);
+ }
+ assert.deepEqual(readdirSync(dir),['preferences.json']);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('native settings cannot persist critical threshold above warning',()=>{
@@ -16,6 +80,8 @@ test('native settings cannot persist critical threshold above warning',()=>{
  const prefs=createPreferences(dir);assert.throws(()=>prefs.update({lowQuotaCriticalPercent:50}));
  assert.deepEqual(prefs.read(),defaults);
  prefs.update({lowQuotaWarningPercent:60,lowQuotaCriticalPercent:50});assert.equal(prefs.read().lowQuotaCriticalPercent,50);
+ const before=prefs.readSnapshot();assert.throws(()=>prefs.update({lowQuotaWarningPercent:10}));
+ assert.deepEqual(prefs.readSnapshot(),before);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('separate preference instances preserve omitted fields and observe saved changes',()=>{
@@ -95,12 +161,15 @@ test('a child contender preserves the live owner lock and retry retains omitted 
  assert.equal(blocked.ok,false);assert.match(blocked.error,existingLockError);
  assert.equal(readFileSync(lockFile,'utf8'),ownerLock);
  assert.equal(prefs.read().showBalance,true);
+ assert.equal(prefs.readSnapshot().revision,1);
  f.release('owner.release');
  const saved=await f.result(owner);assert.equal(saved.ok,true);assert.equal(saved.value.showBalance,false);
+ assert.equal(prefs.readSnapshot().revision,2);
  assert.equal(existsSync(lockFile),false);
  const retried=await f.result(f.start('retry',{refreshIntervalMinutes:7}));
  assert.equal(retried.ok,true);
  assert.deepEqual(retried.value,{...defaults,showBalance:false,refreshIntervalMinutes:7,lowQuotaWarningPercent:25});
  assert.deepEqual(prefs.read(),retried.value);
+ assert.deepEqual(createPreferences(f.stateDir).readSnapshot(),{revision:3,values:retried.value});
  assert.deepEqual(readdirSync(f.stateDir),['preferences.json']);
 });

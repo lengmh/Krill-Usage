@@ -108,6 +108,7 @@ export function normalizePayload(payload = {}) {
   return {
     page: payload.page === 'settings' ? 'settings' : 'usage',
     preferences: normalizePreferences(payload.preferences),
+    preferencesRevision: Number.isSafeInteger(payload.preferencesRevision) && payload.preferencesRevision >= 0 ? payload.preferencesRevision : 0,
     view: {
       snapshot: view.snapshot && Array.isArray(view.snapshot.subscriptions) ? {
         creditBalance: view.snapshot.creditBalance ?? null,
@@ -126,7 +127,10 @@ export function normalizePayload(payload = {}) {
 
 export function freshness(view, now = Date.now(), refreshMinutes = 3) {
   const age = view.lastSuccessAt > 0 ? Math.max(0, now - view.lastSuccessAt) : null;
-  const stale = Boolean(view.stale || (view.snapshot && age !== null && age >= refreshMinutes * 60_000));
+  // The server's stale flag may have used an older preference interval. Derive
+  // freshness from the accepted preferences even when quota and settings arrived
+  // in different results; a failed refresh still marks cached data as stale.
+  const stale = Boolean(view.snapshot && (view.error || (age !== null && age >= refreshMinutes * 60_000)));
   const ageText = age === null ? '尚未成功同步' : age < 60_000 ? '刚刚同步' : `${Math.floor(age / 60_000)} 分钟前同步`;
   const timestamp = age === null ? '尚未成功同步' : new Date(view.lastSuccessAt).toLocaleString('zh-CN', { hour12: false });
   if (view.error) return { tone: 'warning', label: view.snapshot ? '刷新失败 · 保留上次数据' : '暂时无法查询', ageText, timestamp, stale };
@@ -166,7 +170,16 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
     const incomingRevision = payload.view.stateRevision;
     const currentRevision = state.payload.view.stateRevision;
     if (incomingRevision > currentRevision || (incomingRevision === currentRevision &&
-        payload.view.lastSuccessAt >= state.payload.view.lastSuccessAt)) state.payload = payload;
+        payload.view.lastSuccessAt >= state.payload.view.lastSuccessAt)) {
+      state.payload.view = payload.view;
+      state.payload.page = payload.page;
+    }
+    // Settings are global to the local plugin, not to an account or quota GET.
+    // An older quota result can carry newer settings, and vice versa.
+    if (payload.preferencesRevision >= state.payload.preferencesRevision) {
+      state.payload.preferences = payload.preferences;
+      state.payload.preferencesRevision = payload.preferencesRevision;
+    }
     if (entry && !entryReceived) {
       state.page = payload.page;
       entryReceived = true;
