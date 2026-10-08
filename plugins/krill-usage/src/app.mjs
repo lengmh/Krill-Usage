@@ -107,10 +107,21 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
   let disposed = false;
   let suspended = false;
   let refreshTimer = null;
+  let armedRefreshDeadline = null;
   let tickTimer = null;
   let settingsEditVersion = 0;
-  let lastRequestAt = Date.now();
-  const controller = createController({ callTool: (params, options) => app.callServerTool(params, options), onChange: render });
+  // Activation supplies the initial baseline. Only a dispatched quota attempt
+  // advances it; reads, saves, result delivery, and pre-dispatch aborts do not.
+  let lastQuotaAttemptAt = Date.now();
+  let refreshInterval = null;
+  let refreshDeadline = null;
+  const controller = createController({ callTool: (params, options) => {
+    if (params.name === 'krill.refresh') {
+      lastQuotaAttemptAt = Date.now();
+      refreshDeadline = lastQuotaAttemptAt + refreshInterval;
+    }
+    return app.callServerTool(params, options);
+  }, onChange: render });
 
   function createSetup() {
     const box = el('aside', 'setup-card');
@@ -234,26 +245,50 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
     return card;
   }
 
-  function clearTimers() {
+  function clearRefreshTimer() {
     if (refreshTimer !== null) win.clearTimeout(refreshTimer);
-    if (tickTimer !== null) win.clearTimeout(tickTimer);
     refreshTimer = null;
+    armedRefreshDeadline = null;
+  }
+
+  function clearTimers() {
+    clearRefreshTimer();
+    if (tickTimer !== null) win.clearTimeout(tickTimer);
     tickTimer = null;
   }
 
   function schedule() {
-    clearTimers();
-    if (disposed || suspended || doc.visibilityState === 'hidden' || !controller.state.connected) return;
-    tickTimer = win.setTimeout(render, 60_000);
-    if (controller.state.pending || !controller.state.payload.view.authenticated) return;
     const interval = controller.state.payload.preferences.refreshIntervalMinutes * 60_000;
-    const remaining = Math.max(1000, interval - (Date.now() - lastRequestAt));
-    refreshTimer = win.setTimeout(() => void request('krill.refresh'), remaining);
+    if (interval !== refreshInterval) {
+      refreshInterval = interval;
+      refreshDeadline = lastQuotaAttemptAt + interval;
+    }
+    if (disposed || suspended || doc.visibilityState === 'hidden' || !controller.state.connected) {
+      clearTimers();
+      return;
+    }
+    if (tickTimer === null) tickTimer = win.setTimeout(() => {
+      tickTimer = null;
+      render();
+    }, 60_000);
+    if (controller.state.pending || !controller.state.payload.view.authenticated) {
+      clearRefreshTimer();
+      return;
+    }
+    // Preserve a live timer for this absolute deadline, even if a display tick
+    // runs at the same instant. Pausing requests keeps the deadline for catch-up.
+    if (refreshTimer !== null && armedRefreshDeadline === refreshDeadline) return;
+    clearRefreshTimer();
+    armedRefreshDeadline = refreshDeadline;
+    refreshTimer = win.setTimeout(() => {
+      refreshTimer = null;
+      armedRefreshDeadline = null;
+      void request('krill.refresh');
+    }, Math.max(1000, refreshDeadline - Date.now()));
   }
 
   async function request(name, args) {
     if (controller.state.pending || disposed) return false;
-    lastRequestAt = Date.now();
     return controller.request(name, args);
   }
 
