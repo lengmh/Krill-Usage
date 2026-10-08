@@ -78,6 +78,22 @@ node dist/credential-cli.cjs clear
 
 如果设置进程异常退出，系统会保持失败关闭状态。先关闭所有账户设置进程，再运行 `node dist/credential-cli.cjs recover` 并输入 `RECOVER`；该命令只移除已退出进程的无敏感信息锁文件。之后重新执行 `set` 或 `clear`。仍在运行的进程锁不会被移除。
 
+## 偏好设置锁恢复
+
+刷新间隔、余额显示和阈值保存在 `preferences.json` 中，更新时使用同目录下的 `preferences.lock`。只要锁文件存在，其他更新就会失败且不会移除该锁；即使原进程已退出，也不会自动接管。
+
+出现 `Preferences lock already exists` 时，先等正在进行的设置更新结束，再重试。若进程异常退出后仍无法保存，按以下步骤恢复：
+
+1. 关闭所有会话中的 Krill MCP 服务，并确认所有 Krill MCP 进程均已退出。在任何写入进程仍运行时，不能手动删除锁文件。
+2. 根据操作系统找到状态目录：
+   - macOS：`~/Library/Application Support/krill-usage-codex/`。
+   - Windows：`%LOCALAPPDATA%\krill-usage-codex\`；未设置 `LOCALAPPDATA` 时，使用用户主目录下的 `AppData\Local\krill-usage-codex\`。
+   - Linux：若 `XDG_STATE_HOME` 是绝对路径，使用 `$XDG_STATE_HOME/krill-usage-codex/`；否则使用 `~/.local/state/krill-usage-codex/`。
+3. 只删除该目录中的 `preferences.lock`，保留 `preferences.json` 及其他文件。
+4. 重新启动 Krill MCP 服务，再次保存设置。
+
+这是非敏感偏好设置的恢复流程。`credential-cli.cjs recover` 只处理账户凭据锁，不能恢复 `preferences.lock`。
+
 ## 打包与测试
 
 ```sh

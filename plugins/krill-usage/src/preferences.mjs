@@ -22,27 +22,21 @@ export function createPreferences(stateDir) {
     let lock; const temp = `${file}.${randomUUID()}.tmp`;
     try {
       // Synchronous read-modify-write under an exclusive lock also protects
-      // different MCP processes. A simultaneous writer can retry its update.
-      try { lock = fs.openSync(lockFile,'wx',0o600); }
-      catch (error) {
-        if (error.code !== 'EEXIST') throw error;
-        const stat = fs.lstatSync(lockFile);
-        if (!stat.isFile() || stat.size > 32) throw error;
-        const pid = Number(fs.readFileSync(lockFile,'utf8'));
-        if (!Number.isSafeInteger(pid) || pid <= 0) throw error;
-        try { process.kill(pid,0); throw error; }
-        catch (status) { if (status.code !== 'ESRCH') throw error; }
-        const current = fs.lstatSync(lockFile);
-        if (current.ino !== stat.ino || current.mtimeMs !== stat.mtimeMs) throw error;
-        fs.unlinkSync(lockFile); lock = fs.openSync(lockFile,'wx',0o600);
-      }
+      // different MCP processes. Never replace an existing lock, even if stale:
+      // checking its owner and then unlinking cannot be done atomically.
+      lock = fs.openSync(lockFile,'wx',0o600);
       fs.writeFileSync(lock,String(process.pid));
       const next = preferenceSchema.parse({...read(), ...patch});
       if (next.lowQuotaCriticalPercent > next.lowQuotaWarningPercent) throw new Error('Critical quota threshold must not exceed warning threshold.');
       fs.writeFileSync(temp, `${JSON.stringify(next)}\n`, {mode:0o600, flag:'wx'});
       fs.renameSync(temp,file);
       return {...next};
-    } catch { throw new Error('Unable to save preferences. Check values or retry after another settings update.'); }
+    } catch (error) {
+      if (lock === undefined && error.code === 'EEXIST') {
+        throw new Error('Preferences lock already exists. Retry after any active settings update. If it persists, stop all Krill MCP processes before manually removing preferences.lock; see the plugin README.');
+      }
+      throw new Error('Unable to save preferences. Check values or retry after another settings update.');
+    }
     finally {
       try { fs.unlinkSync(temp); } catch {}
       if (lock !== undefined) { try { fs.closeSync(lock); } catch {} try { fs.unlinkSync(lockFile); } catch {} }
