@@ -244,7 +244,7 @@ test("explicit recovery refuses a live lock and removes only a dead lock", async
   const f = fixture(t);
   const lock = path.join(f.stateDir, LOCK_FILE);
   fs.writeFileSync(lock, `${process.pid}\n`, { mode: 0o600 });
-  assert.throws(() => f.store.recoverInterruptedWrite(), noSecret);
+  assert.throws(() => f.store.recoverInterruptedWrite(), { code: "RECOVERY_LIVE_LOCK" });
   const child = spawnSync(process.execPath, ["-e", ""], { encoding: "utf8" });
   assert.equal(child.status, 0);
   fs.writeFileSync(lock, `${child.pid}\n`);

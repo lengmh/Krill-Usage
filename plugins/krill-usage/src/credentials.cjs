@@ -175,28 +175,52 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return { dispose() { fs.unwatchFile(revisionPath, listener); } };
   }
 
-  function recoverInterruptedWrite() {
+  function recoverInterruptedWrite({ manual = false } = {}) {
     // Only called by the owner's explicitly confirmed recovery command. Never
-    // break a live writer's lock; interrupted changes remain unreadable until
-    // the owner successfully sets or clears the credential again.
+    // break a live writer's lock. Manual recovery permits an UNKNOWN owner only
+    // after the owner confirms all other writers are stopped until completion.
+    // Snapshot checks detect changes; they cannot make check-then-unlink atomic.
+    // Recovery never reads the revision marker or initializes the vault.
+    let fd;
+    const refused = (code = "RECOVERY_FAILED") => Object.assign(new Error("Credential lock recovery was refused. No secret details are printed."), { code });
+    const unchanged = (before, after) => ["dev", "ino", "mode", "uid", "nlink", "size", "mtimeMs", "ctimeMs"].every(key => before[key] === after[key]);
     try {
       if (!checkDirectory()) return false;
+      const directory = fs.lstatSync(stateDir);
+      checkPrivate(directory, true);
       let stat;
       try { stat = fs.lstatSync(lockPath); }
       catch (error) { if (error?.code === "ENOENT") return false; throw error; }
       checkPrivate(stat, false);
-      if (stat.size > 32) throw storageError();
-      const pidText = fs.readFileSync(lockPath, "utf8").trim();
-      if (!/^[1-9][0-9]*$/u.test(pidText)) throw storageError();
+      if (stat.size > 32 || stat.nlink !== 1) throw refused();
+      fd = fs.openSync(lockPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+      const opened = fs.fstatSync(fd);
+      checkPrivate(opened, false);
+      if (!unchanged(stat, opened)) throw refused();
+      const contents = Buffer.alloc(33);
+      const bytes = fs.readSync(fd, contents, 0, contents.length, 0);
+      if (bytes !== stat.size || !unchanged(stat, fs.fstatSync(fd))) throw refused();
+      const pidText = contents.toString("utf8", 0, bytes).trim();
       const pid = Number(pidText);
-      if (!Number.isSafeInteger(pid)) throw storageError();
-      try { process.kill(pid, 0); throw storageError(); }
-      catch (error) { if (error?.code !== "ESRCH") throw storageError(); }
+      const validPid = /^[1-9][0-9]*$/u.test(pidText) && Number.isSafeInteger(pid);
+      if (validPid) {
+        try { process.kill(pid, 0); throw refused("RECOVERY_LIVE_LOCK"); }
+        catch (error) { if (error?.code !== "ESRCH") throw refused("RECOVERY_LIVE_LOCK"); }
+      } else if (manual !== true) throw refused("RECOVERY_MANUAL_REQUIRED");
+      fs.closeSync(fd);
+      fd = undefined;
       const current = fs.lstatSync(lockPath);
-      if (current.ino !== stat.ino || current.dev !== stat.dev || current.mtimeMs !== stat.mtimeMs) throw storageError();
+      checkPrivate(current, false);
+      const currentDirectory = fs.lstatSync(stateDir);
+      checkPrivate(currentDirectory, true);
+      if (!unchanged(stat, current) || !unchanged(directory, currentDirectory)) throw refused();
       fs.unlinkSync(lockPath);
       return true;
-    } catch { throw storageError(); }
+    } catch (error) {
+      throw refused(["RECOVERY_MANUAL_REQUIRED", "RECOVERY_LIVE_LOCK"].includes(error?.code) ? error.code : "RECOVERY_FAILED");
+    } finally {
+      if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+    }
   }
 
   return { read, replace, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite };

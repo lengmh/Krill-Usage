@@ -3,12 +3,15 @@
 
 const { createCredentialStore, MAX_CREDENTIAL_LENGTH } = require("./credentials.cjs");
 
-const HELP = "Krill Usage: owner-only credential setup\n\n  node dist/credential-cli.cjs set     Save or replace your JWT using hidden terminal input\n  node dist/credential-cli.cjs clear   Confirm removal from your OS vault\n  node dist/credential-cli.cjs recover Confirm removal of an interrupted setup lock\n\nRun this yourself in a local interactive terminal. Never give a JWT to Codex, chat,\ncommand arguments, environment variables, pipes, or a configuration file.\n";
+const HELP = "Krill Usage: owner-only credential setup\n\n  node dist/credential-cli.cjs set              Save or replace your JWT using hidden terminal input\n  node dist/credential-cli.cjs clear            Confirm removal from your OS vault\n  node dist/credential-cli.cjs recover          Confirm removal of a dead setup lock\n  node dist/credential-cli.cjs recover --manual Confirm stopped writers before removing an empty or malformed lock\n\nRun this yourself in a local interactive terminal. Never give a JWT to Codex, chat,\ncommand arguments, environment variables, pipes, or a configuration file.\n";
 const SAFE_MESSAGES = {
   SECRET_STORAGE: "Secure credential storage is unavailable, locked, or changing. Unlock your OS vault and retry. After interrupted setup, close other credential commands and use recover, then set or clear. No plaintext fallback is used.",
   INVALID_JWT: "Enter one nonempty JWT in the hidden terminal prompt.",
   TTY_REQUIRED: "Run this owner-only command yourself in an interactive terminal; redirected input/output is refused.",
-  CANCELLED: "Cancelled. Your saved credential was not changed."
+  CANCELLED: "Cancelled. Your saved credential was not changed.",
+  RECOVERY_MANUAL_REQUIRED: "The lock has no valid process ID, so its owner is unknown. Stop all other credential commands and related Krill MCP services, then run recover --manual yourself and confirm they will stay stopped until it finishes.",
+  RECOVERY_LIVE_LOCK: "The lock's process is running or cannot be verified as stopped. Close the related processes before trying again. Manual recovery cannot override this check.",
+  RECOVERY_FAILED: "Lock recovery was refused because the state directory or lock is unsafe, inaccessible, or changed during the check. Keep related processes stopped and inspect the state directory's ownership, permissions, and lock file type, size, and links before retrying. No vault credential was read or changed."
 };
 
 function cliError(code) { return Object.assign(new Error(SAFE_MESSAGES[code]), { code }); }
@@ -134,8 +137,9 @@ async function runCredentialCli(args = process.argv.slice(2), { input = process.
     output.write(HELP);
     return 0;
   }
-  if (args.length !== 1 || !["set", "clear", "recover"].includes(args[0])) {
-    output.write("Use only set, clear, or recover. JWT command arguments are not accepted. Run --help for owner-only setup.\n");
+  const manualRecovery = args.length === 2 && args[0] === "recover" && args[1] === "--manual";
+  if (!manualRecovery && (args.length !== 1 || !["set", "clear", "recover"].includes(args[0]))) {
+    output.write("Use only set, clear, recover, or recover --manual. JWT command arguments are not accepted. Run --help for owner-only setup.\n");
     return 2;
   }
   try {
@@ -152,14 +156,20 @@ async function runCredentialCli(args = process.argv.slice(2), { input = process.
       await storeFactory().clear();
       output.write("JWT cleared from your OS vault. Previous account data has been invalidated.\n");
     } else {
-      const confirmation = await hiddenInput({ input, output, signals, prompt: "Close every other credential command first. Type RECOVER to remove a dead setup lock (hidden; Ctrl+C cancels): " });
-      if (confirmation !== "RECOVER") throw cliError("CANCELLED");
-      await storeFactory().recoverInterruptedWrite();
+      if (manualRecovery) {
+        output.write("An empty or malformed lock does not prove its owner has exited. Stop all other Krill credential set, clear, and recover processes and related Krill MCP services. Keep them stopped until this command finishes. Only the credential-write.lock file can be removed.\n");
+      }
+      const confirmation = await hiddenInput({ input, output, signals, prompt: manualRecovery
+        ? "Confirm all other writers are stopped and will stay stopped: type STOPPED UNTIL DONE and press Enter (hidden; Ctrl+C cancels): "
+        : "Close every other credential command first. Type RECOVER to remove a dead setup lock (hidden; Ctrl+C cancels): " });
+      if (confirmation !== (manualRecovery ? "STOPPED UNTIL DONE" : "RECOVER")) throw cliError("CANCELLED");
+      if (manualRecovery) await storeFactory().recoverInterruptedWrite({ manual: true });
+      else await storeFactory().recoverInterruptedWrite();
       output.write("Interrupted lock checked. Run set or clear to complete credential setup. No vault credential was read or changed.\n");
     }
     return 0;
   } catch (error) {
-    const code = Object.prototype.hasOwnProperty.call(SAFE_MESSAGES, error?.code) ? error.code : "SECRET_STORAGE";
+    const code = Object.prototype.hasOwnProperty.call(SAFE_MESSAGES, error?.code) ? error.code : args[0] === "recover" ? "RECOVERY_FAILED" : "SECRET_STORAGE";
     output.write(SAFE_MESSAGES[code] + "\n");
     return code === "CANCELLED" ? 130 : 1;
   }

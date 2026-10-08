@@ -76,7 +76,24 @@ node dist/credential-cli.cjs clear
 
 按提示输入 `CLEAR` 确认。此操作不撤销服务端 JWT，也不注销浏览器。
 
-如果设置进程异常退出，系统会保持失败关闭状态。先关闭所有账户设置进程，再运行 `node dist/credential-cli.cjs recover` 并输入 `RECOVER`；该命令只移除已退出进程的无敏感信息锁文件。之后重新执行 `set` 或 `clear`。仍在运行的进程锁不会被移除。
+### 凭据写入锁恢复
+
+设置进程异常退出后，可能遗留 `credential-write.lock`，阻止后续 `set` 或 `clear`。恢复操作必须由账户本人在本地交互式终端执行：
+
+1. 停止其他所有凭据 `set`、`clear`、`recover` 进程及相关 Krill MCP 服务。从确认停写开始，到恢复命令结束前，不要启动这些进程。
+2. 运行 `node dist/credential-cli.cjs recover`，输入 `RECOVER`。普通恢复只移除记录了有效 PID、且已确认对应进程不存在的锁。
+3. 如果提示锁为空或 PID 格式无效，可运行：
+
+   ```sh
+   node dist/credential-cli.cjs recover --manual
+   ```
+
+   再次确认其他写入进程已停止，并将保持停止直到本命令结束，然后输入 `STOPPED UNTIL DONE`。输入 `RECOVER` 不会确认手动恢复。
+4. 恢复成功后，重新执行 `set` 或 `clear` 完成账户设置，再启动相关服务。
+
+空锁或无效 PID 表示锁的归属未知，不能证明原进程已退出。手动恢复依赖上述停写条件；路径检查与删除不是原子操作，不能在其他写入进程仍运行时使用。有效 PID 对应的进程仍存活或无法确认已退出时，两种模式都会拒绝删除。锁文件过大、不是普通文件、带链接、权限不安全或检查期间发生变化时，也会拒绝操作；不要反复重试，应先检查状态目录和锁文件。
+
+两种模式都只处理固定状态目录中的 `credential-write.lock`，不接受自定义路径或 PID 参数，不读取或修改系统凭据库、`credential-revision.json`、`preferences.json` 或 `preferences.lock`。命令不会自动接管锁，也不会输出锁内容。
 
 ## 偏好设置锁恢复
 
