@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { fetchSubscription } from '../src/api.cjs';
 import { UsageService } from '../src/service.mjs';
 const defer = () => { let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject}; };
 const a={creditBalance:'100',subscriptions:[]}, b={creditBalance:'200',subscriptions:[]};
@@ -54,4 +56,47 @@ test('dispose invalidates in-flight request',async()=>{
 test('vault read failure with readable revision discards retained data',async()=>{
   const {service,credentials}=setup();await service.refresh();credentials.read=async()=>{throw Object.assign(new Error('private vault error'),{code:'SECRET_STORAGE'});};
   const view=await service.refresh();assert.equal(view.snapshot,null);assert.equal(view.authenticated,false);assert.equal(view.error.code,'SECRET_STORAGE');
+});
+
+test('HTTP deadline releases refreshing, retains stale cache, and permits a successful retry',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let calls=0;const destroyed=[];
+  const request=(_url,options,callback)=>{
+    assert.equal(options.headers.Authorization,'Bearer synthetic-account-a');
+    const attempt=++calls,req=new EventEmitter(),res=new EventEmitter();
+    res.statusCode=200;res.headers={};
+    req.setTimeout=()=>req;
+    req.destroy=err=>{
+      destroyed.push(err);res.emit('aborted');res.emit('error',new Error('private response details'));req.emit('error',err);
+      return req;
+    };
+    req.end=()=>queueMicrotask(()=>{
+      callback(res);
+      if(attempt===2){res.emit('data',Buffer.from(' '));return;}
+      res.emit('data',Buffer.from(JSON.stringify({success:true,code:0,data:{
+        credit_balance_usd:attempt===1?'100':'200',subscriptions:[]
+      }})));
+      res.emit('end');
+    });
+    return req;
+  };
+  const {service,state}=setup(jwt=>fetchSubscription(jwt,request));
+  t.after(()=>service.dispose());
+  const initial=await service.refresh();
+  assert.deepEqual(initial.snapshot,a);assert.equal(initial.stale,false);
+  const pending=service.refresh();assert.equal(pending,service.refresh());
+  await tick();assert.equal(calls,2);assert.equal(service.view().refreshing,true);
+  t.mock.timers.tick(11999);assert.equal(service.view().refreshing,true);assert.equal(destroyed.length,0);
+  state.now+=12000;t.mock.timers.tick(1);
+  const timedOut=await pending;
+  assert.equal(timedOut.refreshing,false);assert.equal(timedOut.error.code,'TIMEOUT');
+  assert.equal(timedOut.snapshot,initial.snapshot);assert.equal(timedOut.stale,true);
+  assert.equal(timedOut.lastSuccessAt,initial.lastSuccessAt);assert.equal(timedOut.authenticated,true);
+  assert.equal((await service.read()).stale,true);
+  const retry=service.refresh();assert.notEqual(retry,pending);assert.equal(retry,service.refresh());
+  assert.equal(service.view().refreshing,true);assert.equal(service.view().snapshot,initial.snapshot);assert.equal(service.view().stale,true);
+  const recovered=await retry;
+  assert.equal(calls,3);assert.deepEqual(recovered.snapshot,b);assert.equal(recovered.refreshing,false);
+  assert.equal(recovered.error,null);assert.equal(recovered.stale,false);assert.equal(recovered.lastSuccessAt,state.now);
+  t.mock.timers.tick(24000);assert.equal(destroyed.length,1);assert.equal(destroyed[0].code,'TIMEOUT');
 });
