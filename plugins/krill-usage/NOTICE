@@ -1,0 +1,19 @@
+Krill Usage Codex plugin
+Copyright (c) 2026 MAOHENG LENG (lengmh) and Krill Usage contributors.
+
+This plugin is licensed GPL-3.0-only. The unchanged shared Krill 0.1.4 model
+and credential normalization are bundled from this repository. The root NOTICE
+preserves the historical Krill 0.1.3 MIT license; that historical notice is not
+the license for new 0.1.4 or Codex plugin code.
+
+The MCP registration/build patterns are adapted from Bits & Bolts and OpenAI
+MCP Extensions (https://github.com/openai/mcp-extensions), commit
+7e1be49daea03d7ec46ed2472f410099db2743d6, Copyright OpenAI, Apache-2.0.
+Changes: replaced the CAD application with quota tools, non-secret preferences,
+local OS credential storage, a DOM dashboard, and platform packaging.
+The applicable Apache-2.0 license is included as LICENSES/Apache-2.0.txt.
+No code from the proprietary Data Analytics plugin was copied.
+
+The package includes bundled third-party software. Its individual copyright
+and license notices are retained under THIRD_PARTY_NOTICES/ and native module
+package directories. They apply to the corresponding third-party components.

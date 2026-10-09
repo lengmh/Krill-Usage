@@ -1,0 +1,1 @@
+{"mcpServers":{"krill-usage":{"command":"node","args":["./dist/server.js"],"cwd":"."}}}

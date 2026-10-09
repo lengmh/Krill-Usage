@@ -1,0 +1,10 @@
+{
+  "name": "krill-usage-local",
+  "interface": { "displayName": "Krill Usage Local" },
+  "plugins": [{
+    "name": "krill-usage",
+    "source": { "source": "local", "path": "./plugins/krill-usage" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Developer Tools"
+  }]
+}
