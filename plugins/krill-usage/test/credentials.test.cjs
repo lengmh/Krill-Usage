@@ -5,10 +5,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { EventEmitter } = require("node:events");
 const { spawnSync } = require("node:child_process");
 const { createCredentialStore, defaultStateDir, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH } = require("../src/credentials.cjs");
-const { confirmationInput, runCredentialCli } = require("../src/credential-cli.cjs");
+const { runCredentialCli } = require("../src/credential-cli.cjs");
 
 const TOKEN_A = "synthetic-account-a";
 const TOKEN_B = "synthetic-account-b";
@@ -31,13 +30,12 @@ function fixture(t, overrides = {}) {
   return { stateDir, entry, calls, factoryArgs, store: createCredentialStore({ entryFactory, stateDir }), another: () => createCredentialStore({ entryFactory, stateDir }), secret: () => secret };
 }
 
-function terminal({ isTTY = true } = {}) {
-  const input = new EventEmitter();
-  Object.assign(input, { isTTY, isRaw: false, readableFlowing: false, rawModes: [], setRawMode(value) { this.isRaw = value; this.rawModes.push(value); }, resume() { this.readableFlowing = true; }, pause() { this.readableFlowing = false; } });
+function cliOutput() {
   let written = "";
-  const output = { isTTY, write(value) { written += value; } };
-  const signals = new EventEmitter();
-  return { input, output, signals, written: () => written, send: (value) => input.emit("data", Buffer.from(value)) };
+  const accesses = [];
+  const trap = operation => property => { accesses.push([operation, property]); throw new Error("Terminal input must not be accessed"); };
+  const input = new Proxy({}, { get: trap("get"), set: trap("set"), has: trap("has"), ownKeys: trap("ownKeys"), getOwnPropertyDescriptor: trap("getOwnPropertyDescriptor") });
+  return { input, output: { write(value) { written += value; } }, written: () => written, accesses };
 }
 
 function noSecret(error) {
@@ -262,73 +260,96 @@ test("state directory choices contain no credential and respect absolute XDG sta
   assert.equal(defaultStateDir({ platform: "win32", home: "/synthetic", env: {} }), path.join("/synthetic", "AppData", "Local", "krill-usage-codex"));
 });
 
-test("CLI help and rejected token arguments never initialize the store or echo args", async () => {
-  for (const args of [[], ["--help"], ["set", TOKEN_A], ["clear", "--yes"], [TOKEN_A]]) {
-    const tty = terminal({ isTTY: false });
+test("CLI help and missing confirmations never initialize the store or touch stdin", async () => {
+  for (const [args, expectedCode, instruction] of [
+    [[], 0, /clear --confirm-clear/u],
+    [["--help"], 0, /recover --manual --confirm-stopped/u],
+    [["clear"], 2, /clear --confirm-clear/u],
+    [["recover"], 2, /recover --confirm-stopped/u],
+    [["recover", "--manual"], 2, /recover --manual --confirm-stopped/u]
+  ]) {
+    const io = cliOutput();
     let created = 0;
-    const code = await runCredentialCli(args, { ...tty, storeFactory() { created++; throw new Error("must not reach"); } });
+    const code = await runCredentialCli(args, { ...io, storeFactory() { created++; throw new Error("must not reach"); } });
+    assert.equal(code, expectedCode);
     assert.equal(created, 0);
-    assert.equal(code, args.length === 0 || args[0] === "--help" ? 0 : 2);
-    assert.ok(!tty.written().includes(TOKEN_A));
+    assert.deepEqual(io.accesses, []);
+    assert.match(io.written(), instruction);
+    if (args[0] === "clear") assert.match(io.written(), /remove the saved JWT.*invalidate previous account data/u);
+    if (args[0] === "recover") assert.match(io.written(), /Keep them stopped until the recovery command finishes/u);
   }
 });
 
-test("CLI set receives only the secure-window adapter value and never reads terminal input", async () => {
-  const tty = terminal({ isTTY: false });
-  tty.input.on = tty.input.resume = tty.input.setRawMode = () => { throw new Error("stdin must not be read"); };
-  let saved;
-  let prompted = 0;
-  const result = await runCredentialCli(["set"], { ...tty, prompt: async () => { prompted++; return TOKEN_A; }, storeFactory: () => ({ replace: async value => { saved = value; } }) });
-  assert.equal(result, 0);
-  assert.equal(prompted, 1);
-  assert.equal(saved, TOKEN_A);
-  assert.ok(!tty.written().includes(TOKEN_A));
+test("CLI rejects unknown, duplicate, extra, and wrong-command flags without echoing any argument", async () => {
+  const cases = [
+    [TOKEN_A], ["set", TOKEN_A], ["set", "--confirm-clear"],
+    ["clear", "--yes"], ["clear", "--confirm-stopped"], ["clear", "--manual"],
+    ["clear", "--confirm-clear", "--confirm-clear"], ["clear", "--confirm-clear", TOKEN_A],
+    ["recover", "--confirm-clear"], ["recover", "--confirm-stopped", "--confirm-stopped"],
+    ["recover", "--confirm-stopped", TOKEN_A], ["recover", "--manual=true"],
+    ["recover", "--manual", "--yes"], ["recover", "--manual", "--confirm-clear"],
+    ["recover", "--manual", "--manual", "--confirm-stopped"],
+    ["recover", "--manual", "--confirm-stopped", TOKEN_A]
+  ];
+  for (const args of cases) {
+    const io = cliOutput();
+    let created = 0;
+    assert.equal(await runCredentialCli(args, { ...io, storeFactory() { created++; } }), 2);
+    assert.equal(created, 0);
+    assert.deepEqual(io.accesses, []);
+    assert.equal(io.written(), "Invalid command or flags. Run --help and use exactly one documented command. JWT command arguments are not accepted.\n");
+    assert.ok(!io.written().includes(TOKEN_A));
+  }
+});
+
+test("source and bundled CLI use exact confirmed operations with no terminal access", async () => {
+  const bundledCli = require("../dist/credential-cli.cjs").runCredentialCli;
+  for (const run of [runCredentialCli, bundledCli]) {
+    for (const [args, expected] of [
+      [["set"], [["prompt"], ["store"], ["replace", TOKEN_A]]],
+      [["clear", "--confirm-clear"], [["store"], ["clear"]]],
+      [["recover", "--confirm-stopped"], [["store"], ["recover"]]],
+      [["recover", "--manual", "--confirm-stopped"], [["store"], ["recover", { manual: true }]]]
+    ]) {
+      const io = cliOutput();
+      const calls = [];
+      const options = { ...io, prompt: async () => { calls.push(["prompt"]); return TOKEN_A; }, storeFactory() {
+        calls.push(["store"]);
+        return {
+          replace: async value => calls.push(["replace", value]),
+          clear: async () => calls.push(["clear"]),
+          recoverInterruptedWrite: (...values) => calls.push(["recover", ...values])
+        };
+      } };
+      assert.equal(await run(args, options), 0);
+      assert.deepEqual(calls, expected);
+      assert.deepEqual(io.accesses, []);
+      assert.ok(!io.written().includes(TOKEN_A));
+    }
+  }
 });
 
 test("CLI never constructs a store for cancelled or invalid window input", async () => {
   for (const answer of [TOKEN_A + "\r", TOKEN_A + "\n", "\u0000" + TOKEN_A, "\u0085" + TOKEN_A, "\u2028" + TOKEN_A, "x".repeat(MAX_CREDENTIAL_LENGTH + 1), null]) {
-    const tty = terminal();
+    const io = cliOutput();
     let created = false;
-    const result = await runCredentialCli(["set"], { ...tty, prompt: async () => answer, storeFactory: () => { created = true; } });
+    const result = await runCredentialCli(["set"], { ...io, prompt: async () => answer, storeFactory: () => { created = true; } });
     assert.equal(result, 1);
     assert.equal(created, false);
-    assert.ok(!tty.written().includes(TOKEN_A));
+    assert.ok(!io.written().includes(TOKEN_A));
   }
-  const tty = terminal();
-  const result = await runCredentialCli(["set"], { ...tty, prompt: async () => { throw Object.assign(new Error(TOKEN_A), { code: "CANCELLED" }); }, storeFactory() { throw new Error("must not reach"); } });
+  const io = cliOutput();
+  const result = await runCredentialCli(["set"], { ...io, prompt: async () => { throw Object.assign(new Error(TOKEN_A), { code: "CANCELLED" }); }, storeFactory() { throw new Error("must not reach"); } });
   assert.equal(result, 130);
-  assert.ok(!tty.written().includes(TOKEN_A));
-});
-
-test("CLI clear requires explicit CLEAR; cancellation makes no store calls", async () => {
-  for (const answer of ["no", "yes", "", "CLEAR"]) {
-    const tty = terminal();
-    let cleared = false;
-    const result = runCredentialCli(["clear"], { ...tty, storeFactory: () => ({ clear: async () => { cleared = true; } }) });
-    tty.send(`${answer}\r`);
-    assert.equal(await result, answer === "CLEAR" ? 0 : 130);
-    assert.equal(cleared, answer === "CLEAR");
-  }
-});
-
-test("CLI recovery requires its own confirmation and never calls credential operations", async () => {
-  for (const answer of ["", "CLEAR", "RECOVER"]) {
-    const tty = terminal();
-    let recovered = false;
-    const result = runCredentialCli(["recover"], { ...tty, storeFactory: () => ({ recoverInterruptedWrite: () => { recovered = true; } }) });
-    tty.send(`${answer}\r`);
-    assert.equal(await result, answer === "RECOVER" ? 0 : 130);
-    assert.equal(recovered, answer === "RECOVER");
-  }
+  assert.ok(!io.written().includes(TOKEN_A));
 });
 
 test("CLI sanitizes even adversarial raw storage error details", async () => {
-  const tty = terminal();
-  const result = runCredentialCli(["set"], { ...tty, prompt: async () => TOKEN_A, storeFactory: () => ({ replace: async () => { throw Object.assign(new Error(TOKEN_A), { code: TOKEN_A }); } }) });
-  tty.send(`${TOKEN_A}\r`);
+  const io = cliOutput();
+  const result = runCredentialCli(["set"], { ...io, prompt: async () => TOKEN_A, storeFactory: () => ({ replace: async () => { throw Object.assign(new Error(TOKEN_A), { code: TOKEN_A }); } }) });
   assert.equal(await result, 1);
-  assert.ok(!tty.written().includes(TOKEN_A));
-  assert.match(tty.written(), /No plaintext fallback/u);
+  assert.ok(!io.written().includes(TOKEN_A));
+  assert.match(io.written(), /No plaintext fallback/u);
 });
 
 test("actual CLI subprocess refuses unsupported-platform setup without a native vault read", { skip: process.platform === "win32" }, () => {
@@ -340,15 +361,19 @@ test("actual CLI subprocess refuses unsupported-platform setup without a native 
   assert.ok(!result.stderr.includes(TOKEN_A));
 });
 
-test("nonsecret confirmation restores terminal state on completion and cancellation", async () => {
-  for (const cancel of [false, true]) {
-    const tty = terminal();
-    const result = confirmationInput(tty);
-    tty.send("CLEAR");
-    if (cancel) { tty.signals.emit("SIGINT"); await assert.rejects(result, { code: "CANCELLED" }); }
-    else { tty.send("\r"); assert.equal(await result, "CLEAR"); }
-    assert.deepEqual(tty.input.rawModes, [true, false]);
-    assert.equal(tty.input.listenerCount("data"), 0);
+test("built CLI refuses missing confirmation flags with multiline stdin and no store initialization", () => {
+  const cliPath = path.join(__dirname, "../dist/credential-cli.cjs");
+  const guardPath = path.join(__dirname, "fixtures/credential-cli-guard.cjs");
+  for (const args of [["clear"], ["recover"], ["recover", "--manual"]]) {
+    const result = spawnSync(process.execPath, ["--require", guardPath, cliPath, ...args], {
+      input: `${TOKEN_A}\nsynthetic-paste-tail\n`, encoding: "utf8", timeout: 5_000
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /--confirm-(?:clear|stopped)/u);
+    assert.ok(!result.stderr.includes(TOKEN_A));
+    assert.ok(!result.stderr.includes("synthetic-paste-tail"));
+    assert.ok(!result.stderr.includes("guard violation"));
   }
-  await assert.rejects(confirmationInput(terminal({ isTTY: false })), { code: "TTY_REQUIRED" });
 });

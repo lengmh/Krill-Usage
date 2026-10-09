@@ -82,29 +82,29 @@ MCP 服务在短期本地子进程中初始化并读取系统凭据库，读取�
 删除本地凭据：
 
 ```sh
-node dist/credential-cli.cjs clear
+node dist/credential-cli.cjs clear --confirm-clear
 ```
 
-按提示输入 `CLEAR` 确认。此操作不撤销服务端 JWT，也不注销浏览器。
+`--confirm-clear` 表示确认删除本地 JWT，并使旧账户数据失效；此操作不撤销服务端 JWT，也不注销浏览器。命令不再等待终端输入，缺少确认参数时会提示完整命令并退出，不访问凭据库。确认参数不含秘密；不要在任何参数中附加 JWT。
 
 ### 凭据写入锁恢复
 
-设置进程异常退出后，可能遗留 `credential-write.lock`，阻止后续 `set` 或 `clear`。恢复操作必须由账户本人在本地交互式终端执行：
+设置进程异常退出后，可能遗留 `credential-write.lock`，阻止后续 `set` 或 `clear`。恢复操作必须由账户本人在本地执行。两种模式均须使用 `--confirm-stopped` 确认停写条件，不读取终端输入：
 
 1. 停止其他所有凭据 `set`、`clear`、`recover` 进程及相关 Krill MCP 服务。从确认停写开始，到恢复命令结束前，不要启动这些进程。
-2. 运行 `node dist/credential-cli.cjs recover`，输入 `RECOVER`。普通恢复只移除记录了有效 PID、且已确认对应进程不存在的锁。
+2. 运行 `node dist/credential-cli.cjs recover --confirm-stopped`。普通恢复只移除记录了有效 PID、且已确认对应进程不存在的锁。
 3. 如果提示锁为空或 PID 格式无效，可运行：
 
    ```sh
-   node dist/credential-cli.cjs recover --manual
+   node dist/credential-cli.cjs recover --manual --confirm-stopped
    ```
 
-   再次确认其他写入进程已停止，并将保持停止直到本命令结束，然后输入 `STOPPED UNTIL DONE`。输入 `RECOVER` 不会确认手动恢复。
-4. 恢复成功后，重新执行 `set` 或 `clear` 完成账户设置，再启动相关服务。
+   `--manual` 允许恢复归属未知的锁；`--confirm-stopped` 确认其他写入进程及相关 Krill MCP 服务已停止，并将保持停止直到本命令结束。缺少确认参数时会提示完整命令并退出，不检查或移除锁。
+4. 恢复成功后，重新执行 `set` 或 `clear --confirm-clear` 完成账户设置，再启动相关服务。
 
 空锁或无效 PID 表示锁的归属未知，不能证明原进程已退出。手动恢复依赖上述停写条件；路径检查与删除不是原子操作，不能在其他写入进程仍运行时使用。有效 PID 对应的进程仍存活或无法确认已退出时，两种模式都会拒绝删除。锁文件过大、不是普通文件、带链接、权限不安全或检查期间发生变化时，也会拒绝操作；不要反复重试，应先检查状态目录和锁文件。
 
-两种模式都只处理固定状态目录中的 `credential-write.lock`，不接受自定义路径或 PID 参数，不读取或修改系统凭据库、`credential-revision.json`、`preferences.json` 或 `preferences.lock`。命令不会自动接管锁，也不会输出锁内容。
+两种模式都只处理固定状态目录中的 `credential-write.lock`，不接受自定义路径或 PID 参数，不读取或修改系统凭据库、`credential-revision.json`、`preferences.json` 或 `preferences.lock`。命令不会自动接管锁，也不会输出锁内容。仅接受上方列出的完整命令；未知、重复、多余或用于错误命令的参数会被拒绝，不会回显参数内容，也没有 `--yes` 或标准输入确认回退。
 
 ## 偏好设置锁恢复
 
@@ -122,7 +122,7 @@ node dist/credential-cli.cjs clear
 3. 只删除该目录中的 `preferences.lock`，保留 `preferences.json` 及其他文件。
 4. 重新启动 Krill MCP 服务，再次保存设置。
 
-这是非敏感偏好设置的恢复流程。`credential-cli.cjs recover` 只处理账户凭据锁，不能恢复 `preferences.lock`。
+这是非敏感偏好设置的恢复流程。`credential-cli.cjs recover --confirm-stopped` 只处理账户凭据锁，不能恢复 `preferences.lock`。
 
 ## 打包与测试
 

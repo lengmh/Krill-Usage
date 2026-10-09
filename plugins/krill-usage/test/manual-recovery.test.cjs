@@ -5,14 +5,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { EventEmitter } = require("node:events");
 const { spawnSync } = require("node:child_process");
 const Module = require("node:module");
 const { createCredentialStore, LOCK_FILE, REVISION_FILE } = require("../src/credentials.cjs");
 const { runCredentialCli } = require("../src/credential-cli.cjs");
 
 const TOKEN = "synthetic-recovery-credential";
-const CONFIRM = "STOPPED UNTIL DONE";
 const PRESERVED_FILES = ["synthetic-vault", REVISION_FILE, "preferences.json", "preferences.lock"];
 
 function fixture(t, lockText = "") {
@@ -33,25 +31,22 @@ function fixture(t, lockText = "") {
   return { stateDir, lock, calls, store, snapshot };
 }
 
-function terminal({ inputTTY = true, outputTTY = true } = {}) {
-  const input = new EventEmitter();
-  Object.assign(input, { isTTY: inputTTY, isRaw: false, readableFlowing: false, setRawMode(value) { this.isRaw = value; }, resume() {}, pause() {} });
+function cliOutput() {
   let written = "";
-  return { input, output: { isTTY: outputTTY, write(value) { written += value; } }, signals: new EventEmitter(), written: () => written, send: value => input.emit("data", Buffer.from(value)) };
+  return { output: { write(value) { written += value; } }, written: () => written };
 }
 
-async function runRecovery(store, args = ["recover", "--manual"], answer = CONFIRM) {
-  const tty = terminal();
-  const result = runCredentialCli(args, { ...tty, storeFactory: () => store });
-  tty.send(`${answer}\r`);
-  return { code: await result, written: tty.written() };
+async function runRecovery(store, args = ["recover", "--manual", "--confirm-stopped"]) {
+  const io = cliOutput();
+  const code = await runCredentialCli(args, { ...io, storeFactory: () => store });
+  return { code, written: io.written() };
 }
 
 test("default recovery leaves unknown owners locked and points to manual recovery", async (t) => {
   for (const contents of ["", "not-a-pid", "0", "99999999999999999999999999999999"]) {
     const f = fixture(t, contents);
     const before = f.snapshot();
-    const result = await runRecovery(f.store, ["recover"], "RECOVER");
+    const result = await runRecovery(f.store, ["recover", "--confirm-stopped"]);
     assert.equal(result.code, 1);
     assert.match(result.written, /recover --manual/u);
     assert.equal(fs.readFileSync(f.lock, "utf8"), contents);
@@ -67,15 +62,14 @@ test("confirmed manual recovery removes only empty or malformed locks, then set 
       const before = f.snapshot();
       const result = await runRecovery(f.store);
       assert.equal(result.code, 0);
-      assert.match(result.written, /Keep them stopped until this command finishes/u);
+      assert.match(result.written, /Keep them stopped until the recovery command finishes/u);
       assert.equal(fs.existsSync(f.lock), false);
       assert.deepEqual(f.snapshot(), before, "recovery must preserve vault, marker, and preferences bytes");
       assert.deepEqual(f.calls, [], "recovery must not initialize or access the vault");
       assert.ok(!result.written.includes(TOKEN));
       if (contents.length > 1) assert.ok(!result.written.includes(contents));
-      const tty = terminal();
-      const resultAfter = runCredentialCli([operation], { ...tty, prompt: async () => "synthetic-new-credential", storeFactory: () => f.store });
-      if (operation === "clear") tty.send("CLEAR\r");
+      const io = cliOutput();
+      const resultAfter = runCredentialCli(operation === "clear" ? ["clear", "--confirm-clear"] : ["set"], { ...io, prompt: async () => "synthetic-new-credential", storeFactory: () => f.store });
       assert.equal(await resultAfter, 0);
       assert.deepEqual(f.calls, ["construct", operation]);
       assert.equal(JSON.parse(fs.readFileSync(path.join(f.stateDir, REVISION_FILE), "utf8")).phase, "ready");
@@ -84,52 +78,11 @@ test("confirmed manual recovery removes only empty or malformed locks, then set 
   }
 });
 
-test("manual recovery requires its exact separate confirmation; cancellation makes no store calls", async () => {
-  for (const answer of ["", "RECOVER", "CLEAR", "yes", "stopped until done", "STOPPED UNTIL DONE ", "\u0003", "\u0004"]) {
-    const tty = terminal();
-    let calls = 0;
-    const result = runCredentialCli(["recover", "--manual"], { ...tty, storeFactory() { calls++; throw new Error(TOKEN); } });
-    tty.send(`${answer}\r`);
-    assert.equal(await result, 130);
-    assert.equal(calls, 0);
-    assert.equal(tty.input.isRaw, false);
-    assert.ok(!tty.written().includes(TOKEN));
-  }
-  for (const cancel of [tty => tty.input.emit("end"), tty => tty.signals.emit("SIGTERM")]) {
-    const tty = terminal();
-    let calls = 0;
-    const result = runCredentialCli(["recover", "--manual"], { ...tty, storeFactory() { calls++; } });
-    cancel(tty);
-    assert.equal(await result, 130);
-    assert.equal(calls, 0);
-  }
-});
-
-test("manual recovery rejects either redirected stream, missing raw mode, and extra arguments", async () => {
-  for (const options of [{ inputTTY: false }, { outputTTY: false }, { inputTTY: false, outputTTY: false }, { missingRaw: true }]) {
-    const tty = terminal(options);
-    if (options.missingRaw) delete tty.input.setRawMode;
-    let calls = 0;
-    assert.equal(await runCredentialCli(["recover", "--manual"], { ...tty, storeFactory() { calls++; } }), 1);
-    assert.equal(calls, 0);
-    assert.match(tty.written(), /interactive terminal/u);
-  }
-  for (const args of [["recover", "--manual", TOKEN], ["recover", "--manual", "--yes"], ["recover", "--manual", CONFIRM], ["recover", "--manual", "/tmp/arbitrary"], ["recover", "--manual", "123"], ["recover", "--manual=true"], ["recover", TOKEN], ["set", "--manual"], ["clear", "--manual"]]) {
-    const tty = terminal();
-    let calls = 0;
-    assert.equal(await runCredentialCli(args, { ...tty, storeFactory() { calls++; } }), 2);
-    assert.equal(calls, 0);
-    assert.ok(!tty.written().includes(TOKEN));
-    assert.ok(!tty.written().includes("/tmp/arbitrary"));
-    assert.ok(!tty.written().includes("123"));
-  }
-});
-
 test("known live PID and unverifiable PID refuse even with manual confirmation", async (t) => {
   const f = fixture(t, `${process.pid}\n`);
   const before = f.snapshot();
-  for (const args of [["recover"], ["recover", "--manual"]]) {
-    const result = await runRecovery(f.store, args, args.length === 1 ? "RECOVER" : CONFIRM);
+  for (const args of [["recover", "--confirm-stopped"], ["recover", "--manual", "--confirm-stopped"]]) {
+    const result = await runRecovery(f.store, args);
     assert.equal(result.code, 1);
     assert.match(result.written, /Manual recovery cannot override/u);
     assert.equal(fs.readFileSync(f.lock, "utf8"), `${process.pid}\n`);
@@ -290,17 +243,4 @@ test("manual recovery errors are static and do not loop back to generic recover"
   assert.match(result.written, /ownership, permissions, and lock file type/u);
   assert.ok(!result.written.includes(TOKEN));
   assert.ok(!result.written.includes("use recover, then"));
-});
-
-test("actual CLI subprocess rejects piped manual confirmation without changing a fixture", (t) => {
-  const f = fixture(t);
-  const before = f.snapshot();
-  const cli = path.join(__dirname, "../src/credential-cli.cjs");
-  const result = spawnSync(process.execPath, [cli, "recover", "--manual"], { input: `${CONFIRM}\n`, encoding: "utf8", env: { ...process.env, XDG_STATE_HOME: f.stateDir } });
-  assert.equal(result.status, 1);
-  assert.equal(result.stdout, "");
-  assert.match(result.stderr, /interactive terminal/u);
-  assert.ok(!result.stderr.includes(TOKEN));
-  assert.equal(fs.existsSync(f.lock), true);
-  assert.deepEqual(f.snapshot(), before);
 });
