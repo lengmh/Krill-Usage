@@ -4,7 +4,7 @@ import { z } from 'zod/v4';
 import { preferenceSchema } from './preferences.mjs';
 export const UI_URI = 'ui://krill-usage/dashboard-v1';
 export function createServer({service, preferences, html}) {
-  const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.0'});
+  const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.4'});
   const readonly = {readOnlyHint:true, destructiveHint:false, openWorldHint:false};
   const localRead = {...readonly, openWorldHint:false};
   const result = (view, page) => {

@@ -6,11 +6,16 @@ on:
   pull_request:
     paths: ['plugins/krill-usage/**', 'src/model.js', 'src/jwt.js', '.agents/plugins/marketplace.json', '.github/workflows/codex-plugin.yml']
   workflow_dispatch:
+    inputs:
+      publish_v014:
+        description: Add Codex packages to the existing v0.1.4 release (no overwrite)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: codex-plugin-${{ github.ref }}
-  cancel-in-progress: true
+  group: codex-plugin-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 jobs:
   verify-and-package:
     strategy:
@@ -45,3 +50,26 @@ jobs:
             plugins/krill-usage/artifacts/*.sha256
           if-no-files-found: error
           retention-days: 14
+  publish-v014:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_v014 && github.ref == 'refs/heads/main'
+    needs: verify-and-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Download this run's verified platform packages
+        run: gh run download "$GITHUB_RUN_ID" --pattern 'krill-usage-codex-*' --dir release-downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Add packages, corresponding source and release notes
+        run: node plugins/krill-usage/scripts/release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

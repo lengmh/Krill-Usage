@@ -396,5 +396,5 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
   const root = document.getElementById('app') ?? document.body.appendChild(document.createElement('div'));
   root.id = 'app';
   // A component fixture may mount an explicit bridge instead of connecting to a host.
-  if (!root.hasAttribute('data-manual-mount')) mountKrillApp({ app: new App({ name: 'Krill Usage', version: '0.1.0' }, {}, { autoResize: true }), root });
+  if (!root.hasAttribute('data-manual-mount')) mountKrillApp({ app: new App({ name: 'Krill Usage', version: '0.1.4' }, {}, { autoResize: true }), root });
 }

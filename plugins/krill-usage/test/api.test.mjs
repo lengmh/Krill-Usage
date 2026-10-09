@@ -4,7 +4,7 @@ const body=JSON.stringify({success:true,code:0,data:{credit_balance_usd:null,sub
 function transport({status=200,headers={},text=body,network=false,timeout=false,oversized=false}={}) {
  return (url,options,callback)=>{
   assert.equal(url,API_URL);assert.equal(url,'https://www.krill-code.com/api/subscription');assert.equal(options.method,'GET');assert.equal(options.headers.Authorization,'Bearer synthetic-only');
-  assert.equal(options.headers['User-Agent'],'Krill-Usage-Codex/0.1.0');
+  assert.equal(options.headers['User-Agent'],'Krill-Usage-Codex/0.1.4');
   const req=new EventEmitter();req.setTimeout=(ms,fn)=>{assert.equal(ms,12000);req.timeout=fn;};req.destroy=(err)=>req.emit('error',err);
   req.end=()=>queueMicrotask(()=>{
    if(network){req.emit('error',new Error('private network internals'));return;}

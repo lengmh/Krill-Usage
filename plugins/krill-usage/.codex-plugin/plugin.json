@@ -1,6 +1,6 @@
 {
   "name": "krill-usage",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Unofficial Krill quota and balance dashboard with local credential storage.",
   "author": { "name": "MAOHENG LENG (lengmh)" },
   "mcpServers": "./.mcp.json",

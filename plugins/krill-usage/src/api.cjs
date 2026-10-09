@@ -24,7 +24,7 @@ function requestText(jwt, request = https.request) {
     try {
       req = request(API_URL, { method: 'GET', headers: {
         Accept: 'application/json', Authorization: `Bearer ${jwt}`,
-        'User-Agent': 'Krill-Usage-Codex/0.1.0'
+        'User-Agent': 'Krill-Usage-Codex/0.1.4'
       } }, (res) => {
         const chunks = []; let bytes = 0;
         res.on('data', (chunk) => {

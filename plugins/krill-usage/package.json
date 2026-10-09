@@ -1,5 +1,5 @@
 {
-  "name": "krill-usage-codex-plugin", "version": "0.1.0", "private": true,
+  "name": "krill-usage-codex-plugin", "version": "0.1.4", "private": true,
   "description": "Unofficial local Krill Usage plugin for Codex desktop",
   "license": "GPL-3.0-only", "type": "module", "engines": { "node": ">=22" },
   "scripts": {
