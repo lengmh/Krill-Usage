@@ -1,3 +1,5 @@
+![Krill Usage](media/readme-header.png)
+
 # Krill Usage
 
 非官方 Krill 额度查看工具，提供 VS Code 状态栏扩展和 Codex 桌面插件，用于查看套餐剩余额度与账户余额。
