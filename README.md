@@ -1,4 +1,24 @@
-![Krill Usage](media/readme-header.png)
+<p align="center">
+  <img src="media/readme-header.png" alt="Krill Usage" width="100%" />
+</p>
+
+<p align="center">
+  <strong>Know what’s left without opening the dashboard.</strong><br />
+  Check your remaining Krill quota and account balance from VS Code or Codex. Unofficial companion.
+</p>
+
+<p align="center">
+  <a href="https://github.com/lengmh/Krill-Usage/releases"><img src="https://img.shields.io/github/v/release/lengmh/Krill-Usage?style=flat-square" alt="Latest release" /></a>
+  <a href="https://github.com/lengmh/Krill-Usage/stargazers"><img src="https://img.shields.io/github/stars/lengmh/Krill-Usage?style=flat-square" alt="GitHub stars" /></a>
+  <a href="https://github.com/lengmh/Krill-Usage/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square" alt="License: GPL-3.0-only" /></a>
+</p>
+
+<p align="center">
+  <a href="#选择客户端">Quick Start</a> ·
+  <a href="#功能">Features</a> ·
+  <a href="https://github.com/lengmh/Krill-Usage/blob/main/plugins/krill-usage/README.md">Codex Docs</a> ·
+  <a href="https://github.com/lengmh/Krill-Usage/releases">Releases</a>
+</p>
 
 # Krill Usage
 
