@@ -15,7 +15,7 @@ async function fixture() {
       workspace: { onDidChangeConfiguration: (callback) => { changeSettings = callback; return {}; } },
       window: {
         showInputBox: async () => "synthetic-token",
-        showWarningMessage: async () => "清除",
+        showWarningMessage: async () => "全部清除",
         showInformationMessage: (message) => messages.push(message),
         showErrorMessage: (message) => messages.push(message),
         onDidChangeWindowState: () => ({})
@@ -28,7 +28,7 @@ async function fixture() {
       restartTimers() { this.restarts++; }
       getView() { return {}; }
       setJwt() { return pendingSet.promise; }
-      async clearJwt() { return true; }
+      async clearCredentials() { return true; }
     } },
     "./statusBar": { StatusBarController: class {} }
   });

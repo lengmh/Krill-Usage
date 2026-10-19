@@ -48,3 +48,25 @@ test("expired token, network and Cloudflare errors retain distinct error codes",
     await assert.rejects(fetchSubscription("synthetic-token"), { code });
   }
 });
+
+test("aborted response and response error settle with a safe network failure", async () => {
+  for (const event of ["aborted", "error"]) {
+    const api = loadWithMocks("../src/api", {
+      "node:https": { request(_url, _options, callback) {
+        const request = new EventEmitter();
+        request.setTimeout = () => {};
+        request.write = () => {};
+        request.end = () => queueMicrotask(() => {
+          const response = new EventEmitter();
+          response.statusCode = 200; response.headers = {};
+          callback(response);
+          response.emit("data", Buffer.from('{"partial":'));
+          response.emit(event, new Error("synthetic-sensitive-server-detail"));
+        });
+        return request;
+      } }
+    });
+    await assert.rejects(api.loginWithPassword("synthetic@example.test", "synthetic-password"),
+      error => error.code === "NETWORK" && !error.message.includes("sensitive"));
+  }
+});

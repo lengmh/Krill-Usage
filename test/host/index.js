@@ -5,7 +5,9 @@ const vscode = require("vscode");
 
 const ACCOUNT_A = "synthetic-host-account-a";
 const ACCOUNT_B = "synthetic-host-account-b";
-const COMMANDS = ["krillUsage.setJwt", "krillUsage.refresh", "krillUsage.clearJwt"];
+const EMAIL = "synthetic-host-user@example.invalid";
+const PASSWORD = "synthetic-host-password-测试";
+const COMMANDS = ["krillUsage.login", "krillUsage.setJwt", "krillUsage.refresh", "krillUsage.clearJwt"];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function subscription(id, remaining, { status = "active", limit = "600" } = {}) {
@@ -69,13 +71,14 @@ async function run() {
     });
     try {
       await vscode.workspace.getConfiguration("krillUsage")
-        .update(key, value, vscode.ConfigurationTarget.Workspace);
+        .update(key, value, key === "rememberPassword"
+          ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace);
       await until(() => changes.length > 0 && ready(), `${key} configuration event and render`);
       assert.equal(vscode.workspace.getConfiguration("krillUsage").get(key), value);
     } finally { listener.dispose(); }
   }
 
-  test("real host activates production and registers all three commands", async () => {
+  test("real host activates production and registers all four commands", async () => {
     assert.equal(extension.isActive, true);
     assert.equal(extension.exports, h);
     const commands = await vscode.commands.getCommands(true);
@@ -85,15 +88,15 @@ async function run() {
     assert.ok(h.service.uiTimer);
     assert.equal(item().name, "Krill Usage");
     assert.equal(item().alignment, vscode.StatusBarAlignment.Right);
-    assert.equal(item().command, "krillUsage.setJwt");
-    assert.equal(item().text, "$(key) Krill: 设置 JWT");
+    assert.equal(item().command, "krillUsage.login");
+    assert.equal(item().text, "$(key) Krill: 登录");
     assert.equal(h.transport.requests.length, 0, "No HTTP without a credential");
   });
 
   test("230/600 at warning threshold 50 writes a real warning ThemeColor", async () => {
     await configuration("lowQuotaWarningPercent", 50, () => true);
     await setAccount(ACCOUNT_A, account());
-    assert.equal(await h.context.secrets.get(h.secretKey), ACCOUNT_A,
+    assert.equal(await h.service.getJwt(), ACCOUNT_A,
       "The synthetic credential round-trips through real SecretStorage");
     assert.equal(item().text, "$(pulse) Krill $230/$600");
     assert.equal(item().command, "krillUsage.refresh");
@@ -183,7 +186,7 @@ async function run() {
     assert.doesNotMatch(item().text, /111|1\.11|230/);
     fresh.reply();
     await newCommand;
-    assert.equal(await h.context.secrets.get(h.secretKey), ACCOUNT_B);
+    assert.equal(await h.service.getJwt(), ACCOUNT_B);
     assert.equal(item().text, "$(rocket) Krill $444/$600 · $4.44");
   });
 
@@ -215,9 +218,9 @@ async function run() {
       h.prompts.inputs.push(ACCOUNT_A);
       const oldCommand = execute("setJwt");
       await old.started;
-      h.prompts.confirmations.push("清除");
+      h.prompts.confirmations.push("全部清除");
       await execute("clearJwt");
-      assert.equal(await h.context.secrets.get(h.secretKey), undefined);
+      assert.equal(await h.service.getJwt(), null);
       const messagesBefore = h.prompts.messages.length;
       old.reply();
       await oldCommand;
@@ -227,11 +230,161 @@ async function run() {
       assert.equal(view().lastSuccessAt, 0);
       assert.equal(view().refreshing, false);
       assert.equal(h.prompts.messages.length, messagesBefore, "Cleared request must not send any notification");
-      assert.equal(item().text, "$(key) Krill: 设置 JWT");
-      assert.equal(item().command, "krillUsage.setJwt");
+      assert.equal(item().text, "$(key) Krill: 登录");
+      assert.equal(item().command, "krillUsage.login");
       assert.equal(item().backgroundColor, undefined);
     });
   }
+
+  async function storedAuth() {
+    return JSON.parse(await h.context.secrets.get(h.constants.AUTH_SECRET_KEY));
+  }
+
+  async function logIn(token = ACCOUNT_A) {
+    h.transport.expectLogin(EMAIL, PASSWORD, {
+      json: { success: true, code: 0, data: { token } }
+    });
+    h.transport.expect(token, account());
+    h.prompts.inputs.push(
+      { value: ` ${EMAIL} `, masked: false, title: /1\/2/ },
+      { value: PASSWORD, masked: true, title: /2\/2/ }
+    );
+    await execute("login");
+  }
+
+  test("password login validates quota and remembers synthetic credentials in real SecretStorage", async () => {
+    assert.equal(vscode.workspace.getConfiguration("krillUsage").get("rememberPassword"), true);
+    await logIn();
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_A, email: EMAIL, password: PASSWORD });
+    assert.equal(await h.context.secrets.get(h.secretKey), undefined, "No redundant legacy JWT");
+    assert.equal(view().authenticated, true);
+    assert.equal(view().refreshing, false);
+    assert.equal(view().error, null);
+    assert.equal(item().text, "$(rocket) Krill $230/$600 · $9.87");
+    assert.match(h.prompts.messages.at(-1).message, /登录成功/);
+    for (const { message } of h.prompts.messages) {
+      assert.ok(!message.includes(PASSWORD) && !message.includes(EMAIL), "Notifications must not expose credentials");
+    }
+  });
+
+  test("remembered password recovers one expired JWT through real command dispatch", async () => {
+    const before = h.transport.requests.length;
+    h.transport.expect(ACCOUNT_A, { status: 401, text: "Unauthorized" });
+    h.transport.expectLogin(EMAIL, PASSWORD, {
+      json: { success: true, code: 0, data: { token: ACCOUNT_B } }
+    });
+    h.transport.expect(ACCOUNT_B, account("444", "4.44"));
+    await execute("refresh");
+    assert.equal(h.transport.requests.length - before, 3);
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_B, email: EMAIL, password: PASSWORD });
+    assert.equal(view().error, null);
+    assert.equal(item().text, "$(rocket) Krill $444/$600 · $4.44");
+  });
+
+  test("real application setting disables password retention immediately without HTTP", async () => {
+    const before = h.transport.requests.length;
+    const snapshot = view().snapshot;
+    const apiTimer = h.service.apiTimer;
+    const uiTimer = h.service.uiTimer;
+    await configuration("rememberPassword", false, () => !h.service.rememberPassword());
+    await h.service.credentialWrites;
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_B });
+    assert.equal(await h.context.secrets.get(h.constants.EMAIL_SECRET_KEY), undefined);
+    assert.equal(await h.context.secrets.get(h.constants.PASSWORD_SECRET_KEY), undefined);
+    assert.equal(view().snapshot, snapshot);
+    assert.equal(h.transport.requests.length, before);
+    assert.equal(h.service.apiTimer, apiTimer);
+    assert.equal(h.service.uiTimer, uiTimer);
+  });
+
+  test("JWT-only password login stores only JWT and never auto-logs in after 401", async () => {
+    await logIn();
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_A });
+    const snapshot = view().snapshot;
+    const before = h.transport.requests.length;
+    h.transport.expect(ACCOUNT_A, { status: 401, text: "Unauthorized" });
+    await execute("refresh");
+    assert.equal(h.transport.requests.length - before, 1, "No password POST in JWT-only mode");
+    assert.equal(view().error.code, "UNAUTHORIZED");
+    assert.equal(view().snapshot, snapshot);
+    assert.match(item().text, /刷新失败 · 旧数据$/);
+    await configuration("rememberPassword", true, () => h.service.rememberPassword());
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_A }, "Re-enabling cannot restore a deleted password");
+  });
+
+  test("manual JWT replaces remembered login without leaving email or password", async () => {
+    await logIn();
+    await setAccount(ACCOUNT_B, account("444", "4.44"));
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_B });
+    const before = h.transport.requests.length;
+    h.transport.expect(ACCOUNT_B, { status: 401, text: "Unauthorized" });
+    await execute("refresh");
+    assert.equal(h.transport.requests.length - before, 1);
+    assert.equal(view().error.code, "UNAUTHORIZED");
+  });
+
+  test("clear credentials removes remembered login and leaves a signed-out tombstone", async () => {
+    await logIn();
+    h.prompts.confirmations.push("全部清除");
+    await execute("clearJwt");
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: null });
+    for (const key of [h.secretKey, h.constants.EMAIL_SECRET_KEY, h.constants.PASSWORD_SECRET_KEY]) {
+      assert.equal(await h.context.secrets.get(key), undefined);
+    }
+    const before = h.transport.requests.length;
+    await execute("refresh");
+    assert.equal(h.transport.requests.length, before, "Cleared password cannot sign in again");
+    assert.equal(view().authenticated, false);
+    assert.equal(view().snapshot, null);
+    assert.equal(item().command, "krillUsage.login");
+  });
+
+  test("canceling password input leaves credentials and network untouched", async () => {
+    const before = h.transport.requests.length;
+    const auth = await storedAuth();
+    h.prompts.inputs.push(
+      { value: EMAIL, masked: false, title: /1\/2/ },
+      { value: undefined, masked: true, title: /2\/2/ }
+    );
+    await execute("login");
+    assert.deepEqual(await storedAuth(), auth);
+    assert.equal(h.transport.requests.length, before);
+  });
+
+  test("failed password login never retains rejected synthetic credentials", async () => {
+    const auth = await storedAuth();
+    h.transport.expectLogin(EMAIL, PASSWORD, {
+      status: 401, json: { success: false, code: 401 }
+    });
+    h.prompts.inputs.push(
+      { value: EMAIL, masked: false, title: /1\/2/ },
+      { value: PASSWORD, masked: true, title: /2\/2/ }
+    );
+    await execute("login");
+    assert.deepEqual(await storedAuth(), auth);
+    assert.equal(view().error.code, "LOGIN_FAILED");
+    assert.equal(view().refreshing, false);
+    assert.equal(h.prompts.messages.at(-1).kind, "error");
+    assert.ok(!h.prompts.messages.at(-1).message.includes(PASSWORD));
+  });
+
+  test("legacy JWT remains readable and next explicit write migrates it atomically", async () => {
+    // Only the disposable test profile is edited, using synthetic legacy keys.
+    await h.context.secrets.delete(h.constants.AUTH_SECRET_KEY);
+    await h.context.secrets.store(h.secretKey, ACCOUNT_A);
+    await h.context.secrets.store(h.constants.EMAIL_SECRET_KEY, EMAIL);
+    await h.context.secrets.store(h.constants.PASSWORD_SECRET_KEY, PASSWORD);
+    assert.equal(await h.service.getJwt(), ACCOUNT_A);
+    h.transport.expect(ACCOUNT_A, { status: 401, text: "Unauthorized" });
+    const before = h.transport.requests.length;
+    await execute("refresh");
+    assert.equal(h.transport.requests.length - before, 1, "Legacy separately stored passwords are not auto-used");
+    await setAccount(ACCOUNT_B, account());
+    assert.deepEqual(await storedAuth(), { version: 1, jwt: ACCOUNT_B });
+    for (const key of [h.secretKey, h.constants.EMAIL_SECRET_KEY, h.constants.PASSWORD_SECRET_KEY]) {
+      assert.equal(await h.context.secrets.get(key), undefined, "Migration removes legacy secrets");
+    }
+  });
 
   console.log(`Krill host integration: VS Code ${vscode.version}, ${cases.length} scenarios`);
   try {
@@ -246,7 +399,10 @@ async function run() {
     // exchanges. The synthetic secret/profile is removed even after a failure.
     for (const disposable of [...h.context.subscriptions].reverse()) disposable.dispose();
     h.transport.dispose();
-    await h.context.secrets.delete(h.secretKey);
+    for (const key of [h.secretKey, h.constants.AUTH_SECRET_KEY,
+      h.constants.EMAIL_SECRET_KEY, h.constants.PASSWORD_SECRET_KEY]) {
+      await h.context.secrets.delete(key);
+    }
   }
   assert.equal(passed, cases.length);
   console.log("Host API assertions passed. No screenshot/pixel-contrast claims are made.");
