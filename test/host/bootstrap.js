@@ -16,8 +16,9 @@ async function activate(context) {
   assert.equal(process.env.KRILL_HOST_TEST, "1", "Use test/run-host.js to isolate the host");
   assert.equal(harness, undefined, "The host must activate the extension only once");
   const sourceDirectory = path.resolve(__dirname, "../../src");
-  const { API_URL, SECRET_KEY } = require(path.join(sourceDirectory, "constants"));
-  const transport = new SyntheticTransport(API_URL);
+  const constants = require(path.join(sourceDirectory, "constants"));
+  const { API_URL, LOGIN_URL, SECRET_KEY } = constants;
+  const transport = new SyntheticTransport(API_URL, LOGIN_URL);
   const inputs = [];
   const confirmations = [];
   const messages = [];
@@ -30,9 +31,15 @@ async function activate(context) {
   };
   const windowOverrides = {
       async showInputBox(options) {
-        assert.equal(options.password, true, "Credential input must be masked");
         assert.ok(inputs.length, "Unexpected input dialog");
-        return inputs.shift();
+        const input = inputs.shift();
+        if (input && typeof input === "object") {
+          assert.equal(options.password === true, input.masked, "Input masking must match the field");
+          assert.match(options.title, input.title);
+          return input.value;
+        }
+        assert.equal(options.password, true, "JWT input must be masked");
+        return input;
       },
       async showWarningMessage(message, ...arguments_) {
         if (arguments_[0]?.modal) {
@@ -60,7 +67,7 @@ async function activate(context) {
     window: { value: windowFacade, enumerable: true }
   });
 
-  harness = { context, transport, prompts, secretKey: SECRET_KEY, service: null, controller: null };
+  harness = { context, transport, prompts, constants, secretKey: SECRET_KEY, service: null, controller: null };
   const originalLoad = Module._load;
   const scopedLoad = function (request, parent, isMain) {
     if (parent?.filename.startsWith(sourceDirectory + path.sep)) {
@@ -100,7 +107,9 @@ async function activate(context) {
   context.subscriptions.push({ dispose: restoreLoader });
 
   // A fresh profile must have no Krill secret. Never read the user's profile.
-  assert.equal(await context.secrets.get(SECRET_KEY), undefined);
+  for (const key of [SECRET_KEY, constants.AUTH_SECRET_KEY, constants.EMAIL_SECRET_KEY, constants.PASSWORD_SECRET_KEY]) {
+    assert.equal(await context.secrets.get(key), undefined, "Isolated profile must start with no Krill secrets");
+  }
   await production.activate(context);
   return harness;
 }

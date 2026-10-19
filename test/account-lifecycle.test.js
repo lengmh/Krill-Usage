@@ -3,16 +3,17 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadWithMocks, deferred, tick } = require("./helpers");
+const { SECRET_KEY, AUTH_SECRET_KEY } = require("../src/constants");
 
 // All credential labels and account snapshots in these tests are synthetic.
 function fixture(secretOverrides = {}) {
-  let stored = "synthetic-account-a";
+  const stored = new Map([[SECRET_KEY, "synthetic-account-a"]]);
   const requests = [];
   const errors = [];
   const secrets = {
-    async get() { return stored; },
-    async store(_key, value) { stored = value; },
-    async delete() { stored = undefined; },
+    async get(key) { return stored.get(key); },
+    async store(key, value) { stored.set(key, value); },
+    async delete(key) { stored.delete(key); },
     ...secretOverrides
   };
   const { KrillUsageService } = loadWithMocks("../src/service", {
@@ -27,7 +28,8 @@ function fixture(secretOverrides = {}) {
     } }
   });
   const service = new KrillUsageService({ secrets });
-  return { service, requests, errors, getStored: () => stored };
+  return { service, requests, errors, getStored: () => stored.has(AUTH_SECRET_KEY)
+    ? JSON.parse(stored.get(AUTH_SECRET_KEY)).jwt ?? undefined : stored.get(SECRET_KEY) };
 }
 
 const account = (balance) => ({ creditBalance: balance, subscriptions: [] });
@@ -74,7 +76,7 @@ test("clearing credentials blocks late success and late error without a toast", 
 
 test("simultaneous refreshes share one request even while SecretStorage is pending", async () => {
   const read = deferred();
-  const { service, requests } = fixture({ get: () => read.promise });
+  const { service, requests } = fixture({ get: (key) => key === AUTH_SECRET_KEY ? Promise.resolve(undefined) : read.promise });
   const first = service.refresh();
   const second = service.refresh();
   read.resolve("synthetic-account-a");
@@ -88,7 +90,7 @@ test("simultaneous refreshes share one request even while SecretStorage is pendi
 
 test("clear invalidates a pending SecretStorage read before it can send a request", async () => {
   const read = deferred();
-  const { service, requests } = fixture({ get: () => read.promise });
+  const { service, requests } = fixture({ get: (key) => key === AUTH_SECRET_KEY ? Promise.resolve(undefined) : read.promise });
   const pending = service.refresh();
   await tick();
   await service.clearJwt();
@@ -103,8 +105,8 @@ test("rapid set then clear persists in intent order and never fetches the supers
   const write = deferred();
   let stored;
   const { service, requests } = fixture({
-    store: async (_key, value) => { await write.promise; stored = value; },
-    delete: async () => { stored = undefined; }
+    store: async (key, value) => { await write.promise; if (key === AUTH_SECRET_KEY) stored = JSON.parse(value).jwt ?? undefined; },
+    delete: async () => {}
   });
   const setting = service.setJwt("synthetic-account-b");
   const clearing = service.clearJwt();
@@ -127,7 +129,9 @@ test("dispose prevents pending work from publishing state", async () => {
 });
 
 test("a failed credential write does not poison later refresh or clear", async () => {
-  const { service, requests } = fixture({ store: async () => { throw new Error("Synthetic storage failure"); } });
+  const { service, requests } = fixture({ store: async (_key, value) => {
+    if (JSON.parse(value).jwt !== null) throw new Error("Synthetic storage failure");
+  } });
   assert.equal(await service.setJwt("synthetic-account-b"), null);
   assert.equal(service.getView().error.code, "SECRET_STORAGE");
   const retry = service.refresh();

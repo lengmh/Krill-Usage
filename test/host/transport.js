@@ -7,8 +7,9 @@ const { EventEmitter } = require("node:events");
 // api.js still handles HTTP statuses, headers, JSON, normalization, and errors.
 // There is no pass-through, so this harness cannot send a Krill HTTP request.
 class SyntheticTransport {
-  constructor(apiUrl) {
+  constructor(apiUrl, loginUrl) {
     this.apiUrl = apiUrl;
+    this.loginUrl = loginUrl;
     this.queue = [];
     this.requests = [];
     this.unexpected = [];
@@ -20,7 +21,7 @@ class SyntheticTransport {
     assert.match(token, /^synthetic-host-account-/);
     let started;
     const exchange = {
-      token, response, hold,
+      token, response, hold, method: "GET", url: this.apiUrl,
       started: new Promise((resolve) => { started = resolve; }),
       markStarted: () => started(),
       reply: null
@@ -29,14 +30,27 @@ class SyntheticTransport {
     return exchange;
   }
 
+  expectLogin(email, password, response, options = {}) {
+    assert.match(email, /^synthetic-host-.*@example\.invalid$/);
+    assert.match(password, /^synthetic-host-password-/);
+    const exchange = this.expect("synthetic-host-account-login-fixture", response, options);
+    Object.assign(exchange, { method: "POST", url: this.loginUrl, email, password });
+    return exchange;
+  }
+
   request(url, options, callback) {
     let exchange;
     try {
-      assert.equal(String(url), this.apiUrl, "Unexpected production HTTP destination");
-      assert.equal(options.method, "GET");
       exchange = this.queue.shift();
       assert.ok(exchange, "Unexpected production HTTP request; no fixture was queued");
-      assert.equal(options.headers.Authorization, `Bearer ${exchange.token}`);
+      assert.equal(String(url), exchange.url, "Unexpected production HTTP destination");
+      assert.equal(options.method, exchange.method);
+      if (exchange.method === "GET") {
+        assert.equal(options.headers.Authorization, `Bearer ${exchange.token}`);
+      } else {
+        assert.equal(options.headers.Authorization, undefined, "Login must not transmit a previous JWT");
+        assert.equal(options.headers["Content-Type"], "application/json");
+      }
     } catch (error) {
       this.unexpected.push(error);
       throw error;
@@ -70,7 +84,20 @@ class SyntheticTransport {
         incoming.emit("end");
       });
     };
+    const chunks = [];
+    request.write = (chunk) => { chunks.push(Buffer.from(chunk)); return true; };
     request.end = () => {
+      try {
+        const body = Buffer.concat(chunks);
+        if (exchange.method === "POST") {
+          assert.deepEqual(JSON.parse(body.toString("utf8")), {
+            email: exchange.email, password: exchange.password
+          }, "Only the exact synthetic email/password may be posted");
+          assert.equal(options.headers["Content-Length"], String(body.length));
+        } else {
+          assert.equal(body.length, 0, "Subscription GET must have no request body");
+        }
+      } catch (error) { this.unexpected.push(error); throw error; }
       this.requests.push(exchange);
       this.pending.add(exchange);
       exchange.markStarted();

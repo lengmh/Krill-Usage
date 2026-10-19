@@ -1,8 +1,11 @@
 "use strict";
 
 const vscode = require("vscode");
-const { fetchSubscription } = require("./api");
-const { SECRET_KEY, DEFAULT_REFRESH_MINUTES, UI_TICK_MS } = require("./constants");
+const { fetchSubscription, loginWithPassword, KrillApiError } = require("./api");
+const {
+  SECRET_KEY, AUTH_SECRET_KEY, EMAIL_SECRET_KEY, PASSWORD_SECRET_KEY,
+  DEFAULT_REFRESH_MINUTES, UI_TICK_MS
+} = require("./constants");
 const { sanitizeJwt } = require("./jwt");
 
 class KrillUsageService {
@@ -18,10 +21,19 @@ class KrillUsageService {
     this.disposed = false;
     this.generation = 0;
     this.activeRefresh = null;
+    this.activeLogin = null;
     this.credentialWrites = Promise.resolve();
+    this._hasJwt = false;
+    // Failed automated sign-in never retries on the next 3-minute tick.
+    // A new explicit login or JWT setting can unblock it.
+    this.autoLoginBlocked = false;
   }
 
   async initialize() {
+    if (!this.rememberPassword()) {
+      await this.onRememberPasswordChanged();
+      if (this.error?.code === "SECRET_STORAGE") return;
+    }
     this.startTimers();
     await this.refresh("startup", { silent: true });
   }
@@ -51,50 +63,106 @@ class KrillUsageService {
     }
   }
 
+  async readAuth() {
+    const raw = await this.context.secrets.get(AUTH_SECRET_KEY);
+    if (raw !== undefined && raw !== null) {
+      let auth;
+      try { auth = JSON.parse(raw); } catch { throw new Error("Invalid stored credentials"); }
+      if (auth?.version !== 1 || !(auth.jwt === null || typeof auth.jwt === "string")) {
+        throw new Error("Invalid stored credentials");
+      }
+      return auth;
+    }
+    // Upgrade old JWT-only installs. Separate candidate email/password keys are
+    // never trusted as a pair because a partial write may have mixed accounts.
+    return { version: 1, jwt: await this.context.secrets.get(SECRET_KEY) ?? null };
+  }
+
+  async writeAuth(auth) {
+    // One atomic SecretStorage value binds all credentials to the same account.
+    // A null JWT is a tombstone: legacy cleanup failure must not revive a login.
+    await this.context.secrets.store(AUTH_SECRET_KEY, JSON.stringify(auth));
+    const cleanup = await Promise.allSettled([
+      this.context.secrets.delete(SECRET_KEY),
+      this.context.secrets.delete(EMAIL_SECRET_KEY),
+      this.context.secrets.delete(PASSWORD_SECRET_KEY)
+    ]);
+    if (cleanup.some(result => result.status === "rejected")) {
+      throw new Error("Legacy credential cleanup failed");
+    }
+  }
+
   async getJwt(generation = this.generation) {
-    const jwt = await this.context.secrets.get(SECRET_KEY);
+    const { jwt } = await this.readAuth();
     if (this.disposed || generation !== this.generation) return null;
     this._hasJwt = Boolean(jwt);
     return jwt ?? null;
   }
 
+  rememberPassword() {
+    return vscode.workspace.getConfiguration("krillUsage").get("rememberPassword", true) === true;
+  }
+
+  async readLoginCredentials(generation = this.generation) {
+    if (!this.rememberPassword()) return null;
+    const auth = await this.readAuth();
+    const { email, password } = auth;
+    if (this.disposed || this.generation !== generation || !this.rememberPassword()) return null;
+    return typeof email === "string" && email && typeof password === "string" && password
+      ? { email, password, expectedRecord: JSON.stringify(auth) } : null;
+  }
+
   async setJwt(rawJwt) {
     const jwt = sanitizeJwt(rawJwt);
-    if (!jwt) throw new Error("EMPTY_JWT");
+    if (!jwt || jwt.length > 16_384 || /\s/.test(jwt)) throw new Error("EMPTY_JWT");
     const generation = this.generation + 1;
-    if (!await this.changeCredentials(jwt)) return null;
+    // A manually supplied token must not resurrect a previous account when it expires.
+    if (!await this.changeCredentials(jwt, null)) return null;
     if (this.disposed || generation !== this.generation) return null;
     return this.refresh("set-jwt");
   }
 
-  async clearJwt() {
-    return this.changeCredentials(null);
+  async clearJwt() { return this.clearCredentials(); }
+  async clearCredentials() { return this.changeCredentials(null, null); }
+
+  queueSecretWrite(action) {
+    const write = this.credentialWrites.catch(() => {}).then(action);
+    this.credentialWrites = write.catch(() => {});
+    return write;
   }
 
-  async changeCredentials(jwt) {
-    if (this.disposed) return false;
-    // Invalidate reads and requests before awaiting SecretStorage. Old requests
-    // may finish, but no longer own any state or notifications in this window.
+  invalidateInFlight() {
     const generation = ++this.generation;
     this.activeRefresh = null;
+    this.activeLogin = null;
     this.refreshing = false;
+    return generation;
+  }
+
+  async changeCredentials(jwt, credentials = null) {
+    if (this.disposed) return false;
+    const generation = this.invalidateInFlight();
     this._hasJwt = false;
     this.snapshot = null;
     this.error = null;
     this.lastSuccessAt = 0;
+    this.autoLoginBlocked = false;
     this.emit();
-    // Preserve the user's set/clear order even if storage writes finish slowly.
-    const write = this.credentialWrites.catch(() => {}).then(() => {
-      if (jwt === null) return this.context.secrets.delete(SECRET_KEY);
-      return this.context.secrets.store(SECRET_KEY, jwt);
-    });
-    this.credentialWrites = write.catch(() => {});
+
     try {
-      await write;
+      await this.queueSecretWrite(async () => {
+        const auth = { version: 1, jwt };
+        if (credentials && this.rememberPassword()) {
+          auth.email = credentials.email;
+          auth.password = credentials.password;
+        }
+        await this.writeAuth(auth);
+      });
     } catch {
-      if (this.disposed || generation !== this.generation) return false;
-      this.error = { code: "SECRET_STORAGE", message: "凭据保存或清除失败，请重试" };
-      this.emit();
+      if (!this.disposed && generation === this.generation) {
+        this.error = { code: "SECRET_STORAGE", message: "凭据保存或清除失败，请重试" };
+        this.emit();
+      }
       return false;
     }
     if (this.disposed || generation !== this.generation) return false;
@@ -103,10 +171,78 @@ class KrillUsageService {
     return true;
   }
 
+  /** Direct interactive sign-in. Authenticate and check quota before retaining credentials. */
+  logIn(email, password) {
+    if (this.disposed) return Promise.resolve(null);
+    const generation = this.invalidateInFlight();
+    const operation = { generation, promise: null };
+    this.activeLogin = operation;
+    operation.promise = this.runLogIn(operation, email, password);
+    return operation.promise;
+  }
+
+  async runLogIn(operation, email, password) {
+    const { generation } = operation;
+    this.refreshing = true;
+    this.error = null;
+    this.emit();
+    try {
+      const jwt = await loginWithPassword(email, password);
+      if (this.disposed || generation !== this.generation) return null;
+      const snapshot = await fetchSubscription(jwt);
+      if (this.disposed || generation !== this.generation) return null;
+      const credentials = this.rememberPassword() ? { email: email.trim(), password } : null;
+      if (!await this.changeCredentials(jwt, credentials)) return null;
+      // changeCredentials increments generation; no awaited work between check and publish.
+      this.snapshot = snapshot;
+      this.lastSuccessAt = Date.now();
+      this.error = null;
+      this.emit();
+      return snapshot;
+    } catch (error) {
+      if (!this.disposed && generation === this.generation) {
+        this.error = {
+          code: error?.code ?? "LOGIN_FAILED",
+          message: error?.message ?? "Krill 登录失败"
+        };
+        this.emit();
+      }
+      return null;
+    } finally {
+      if (this.activeLogin === operation) this.activeLogin = null;
+      if (!this.disposed && generation === this.generation) {
+        this.refreshing = false;
+        this.emit();
+      }
+    }
+  }
+
+  /** Setting to JWT-only must immediately delete persisted email/password. */
+  async onRememberPasswordChanged() {
+    if (this.disposed) return;
+    if (this.rememberPassword()) {
+      // Re-enabling does not magically restore deleted credentials.
+      this.emit();
+      return;
+    }
+    const generation = this.invalidateInFlight();
+    try {
+      await this.queueSecretWrite(async () => {
+        const { jwt } = await this.readAuth();
+        await this.writeAuth({ version: 1, jwt });
+      });
+    } catch {
+      if (generation === this.generation && !this.disposed) {
+        this.error = { code: "SECRET_STORAGE", message: "删除保存的账号密码失败，请重试" };
+      }
+    }
+    if (generation === this.generation && !this.disposed) this.emit();
+  }
+
   refresh(source = "manual", { silent = false } = {}) {
     if (this.disposed) return Promise.resolve(null);
+    if (this.activeLogin) return this.activeLogin.promise;
     if (this.activeRefresh) return this.activeRefresh.promise;
-    // Reserve ownership synchronously, including the pending SecretStorage read.
     const operation = { generation: this.generation, promise: null };
     this.activeRefresh = operation;
     operation.promise = this.runRefresh(operation, source, silent);
@@ -118,19 +254,33 @@ class KrillUsageService {
       operation.generation === this.generation && this.activeRefresh === operation;
     this.refreshing = true;
     this.emit();
-
     try {
       await this.credentialWrites;
       if (!isCurrent()) return null;
-      const jwt = await this.getJwt(operation.generation);
+      let jwt = await this.getJwt(operation.generation);
       if (!isCurrent()) return null;
+      let snapshot;
+
       if (!jwt) {
-        this.snapshot = null;
-        this.lastSuccessAt = 0;
-        this.error = { code: "NO_JWT", message: "尚未设置 krill_jwt" };
-        return null;
+        snapshot = await this.recoverLogin(operation, isCurrent);
+        if (!isCurrent()) return null;
+        if (!snapshot) {
+          this.error = { code: "NO_JWT", message: this.autoLoginBlocked
+            ? "自动登录已暂停，请手动登录 Krill"
+            : "尚未登录，请使用 Krill: Log In 或手动设置 JWT" };
+          return null;
+        }
+      } else {
+        try {
+          snapshot = await fetchSubscription(jwt);
+        } catch (error) {
+          if (error?.code !== "UNAUTHORIZED") throw error;
+          // Recover only for explicit 401 / business 401, never for network/CF/5xx.
+          snapshot = await this.recoverLogin(operation, isCurrent);
+          if (!snapshot) throw new KrillApiError("UNAUTHORIZED", this.autoLoginBlocked
+            ? "自动重新登录已暂停，请手动登录 Krill" : "JWT 已失效，请重新登录 Krill");
+        }
       }
-      const snapshot = await fetchSubscription(jwt);
       if (!isCurrent()) return null;
       this.snapshot = snapshot;
       this.lastSuccessAt = Date.now();
@@ -155,29 +305,71 @@ class KrillUsageService {
     }
   }
 
+  /** Only one automatic re-login per refresh; any failure disables future auto-attempts. */
+  async recoverLogin(operation, isCurrent) {
+    if (!this.rememberPassword() || this.autoLoginBlocked) return null;
+    const credentials = await this.readLoginCredentials(operation.generation);
+    if (!isCurrent() || !credentials) return null;
+    try {
+      const jwt = await loginWithPassword(credentials.email, credentials.password);
+      if (!isCurrent() || !this.rememberPassword()) return null;
+      const snapshot = await fetchSubscription(jwt);
+      if (!isCurrent() || !this.rememberPassword()) return null;
+      await this.queueSecretWrite(async () => {
+        if (!isCurrent() || !this.rememberPassword()) return;
+        const currentAuth = await this.readAuth();
+        if (!isCurrent() || !this.rememberPassword()) return;
+        // Another VS Code window may have cleared/switched accounts during the
+        // network request. Never overwrite its newer identity with this retry.
+        // SecretStorage offers no compare-and-swap; this narrows, not eliminates,
+        // the cross-process read/write race.
+        if (JSON.stringify(currentAuth) !== credentials.expectedRecord) {
+          const sameAccountRenewal = currentAuth.email === credentials.email &&
+            currentAuth.password === credentials.password &&
+            typeof currentAuth.jwt === "string" && currentAuth.jwt.length > 0 &&
+            currentAuth.jwt.length <= 16_384 && !/\s/.test(currentAuth.jwt) &&
+            currentAuth.jwt !== JSON.parse(credentials.expectedRecord).jwt;
+          // Another window already renewed this same account. Keep its token,
+          // but the quota verified by this completed request remains usable.
+          if (sameAccountRenewal) return;
+          this.invalidateInFlight();
+          this.snapshot = null;
+          this.lastSuccessAt = 0;
+          this.error = null;
+          this._hasJwt = Boolean(currentAuth.jwt);
+          this.emit();
+          return;
+        }
+        await this.writeAuth({ version: 1, jwt, email: credentials.email, password: credentials.password });
+      });
+      if (!isCurrent()) return null;
+      this._hasJwt = true;
+      this.autoLoginBlocked = false;
+      return snapshot;
+    } catch {
+      if (isCurrent()) this.autoLoginBlocked = true;
+      // Do not echo server messages or secrets in the background retry path.
+      throw new KrillApiError("AUTO_LOGIN_FAILED", "自动重新登录失败并已暂停，请手动登录 Krill");
+    }
+  }
+
   getRefreshMinutes() {
-    const configured = vscode.workspace
-      .getConfiguration("krillUsage")
-      .get("refreshIntervalMinutes", DEFAULT_REFRESH_MINUTES);
-    const n = Number(configured);
+    const n = Number(vscode.workspace.getConfiguration("krillUsage")
+      .get("refreshIntervalMinutes", DEFAULT_REFRESH_MINUTES));
     return Number.isFinite(n) ? Math.max(1, Math.min(60, n)) : DEFAULT_REFRESH_MINUTES;
   }
 
   startTimers() {
     this.stopTimers();
     if (this.disposed) return;
-    const minutes = this.getRefreshMinutes();
-    this.apiTimer = setInterval(() => this.refresh("auto", { silent: true }), minutes * 60_000);
+    this.apiTimer = setInterval(() => this.refresh("auto", { silent: true }), this.getRefreshMinutes() * 60_000);
     this.uiTimer = setInterval(() => this.emit(), UI_TICK_MS);
   }
 
-  restartTimers() {
-    this.startTimers();
-    this.emit();
-  }
+  restartTimers() { this.startTimers(); this.emit(); }
 
   async refreshIfStale() {
-    if (!this._hasJwt || this.disposed) return;
+    if (this.disposed) return;
     const maxAge = this.getRefreshMinutes() * 60_000;
     if (!this.lastSuccessAt || Date.now() - this.lastSuccessAt >= maxAge) {
       await this.refresh("focus", { silent: true });
@@ -193,9 +385,7 @@ class KrillUsageService {
 
   dispose() {
     this.disposed = true;
-    this.generation++;
-    this.activeRefresh = null;
-    this.refreshing = false;
+    this.invalidateInFlight();
     this.stopTimers();
     this.listeners.clear();
   }

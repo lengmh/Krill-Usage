@@ -2,7 +2,7 @@
   "name": "krill-usage",
   "displayName": "Krill Usage",
   "description": "非官方 Krill 额度工具：在 VS Code 中查看套餐额度与账户余额。",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "lengmh",
   "license": "GPL-3.0-only",
   "icon": "media/icon.png",
@@ -25,12 +25,18 @@
   "main": "./src/extension.js",
   "activationEvents": [
     "onStartupFinished",
+    "onCommand:krillUsage.login",
     "onCommand:krillUsage.setJwt",
     "onCommand:krillUsage.refresh",
     "onCommand:krillUsage.clearJwt"
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "krillUsage.login",
+        "title": "Krill: Log In (Email/Password)",
+        "category": "Krill Usage"
+      },
       {
         "command": "krillUsage.setJwt",
         "title": "Krill: Set JWT",
@@ -43,7 +49,7 @@
       },
       {
         "command": "krillUsage.clearJwt",
-        "title": "Krill: Clear JWT",
+        "title": "Krill: Clear Credentials",
         "category": "Krill Usage"
       }
     ],
@@ -108,6 +114,12 @@
           "minimum": 0,
           "maximum": 100,
           "description": "剩余额度百分比小于或等于该值时，状态栏使用危险色。建议不高于警告阈值。"
+        },
+        "krillUsage.rememberPassword": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "记住 Krill 登录邮箱和密码（存入 VS Code SecretStorage），用于 JWT 失效时自动重新登录。关闭后立即删除已保存的邮箱、密码，并保留现有 JWT。"
         }
       }
     }
@@ -116,7 +128,7 @@
     "test": "node --test test/*.test.js",
     "check": "node --check src/extension.js && node --check src/service.js && node --check src/statusBar.js && node --check src/api.js && node --check src/model.js && node --check src/format.js && node --check src/jwt.js && node --check src/constants.js",
     "test:host": "node test/run-host.js",
-    "package": "vsce package --no-dependencies --out krill-usage-0.1.4.vsix"
+    "package": "vsce package --no-dependencies --out krill-usage-0.1.5.vsix"
   },
   "files": [
     "src/**",

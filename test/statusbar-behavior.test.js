@@ -86,7 +86,7 @@ test("first-load failure and cleared credentials show distinct actionable states
   view.authenticated = false;
   view.error = null;
   controller.render(view);
-  assert.equal(item.text, "$(key) Krill: 设置 JWT");
-  assert.equal(item.command, "krillUsage.setJwt");
+  assert.equal(item.text, "$(key) Krill: 登录");
+  assert.equal(item.command, "krillUsage.login");
   assert.equal(item.backgroundColor, undefined);
 });

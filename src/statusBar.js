@@ -42,9 +42,9 @@ class StatusBarController {
     const configuredIcon = getStatusBarIcon(config);
 
     if (!view.authenticated) {
-      this.item.text = "$(key) Krill: 设置 JWT";
-      this.item.tooltip = "点击设置 krill_jwt";
-      this.item.command = "krillUsage.setJwt";
+      this.item.text = "$(key) Krill: 登录";
+      this.item.tooltip = "点击使用邮箱、密码登录 Krill（亦可在命令面板手动设置 JWT）";
+      this.item.command = "krillUsage.login";
       this.item.color = undefined;
       this.item.backgroundColor = undefined;
       return;
@@ -91,8 +91,7 @@ class StatusBarController {
       // No active subscription with remaining quota: show account balance.
       // This covers both no-active-plan and all-active-plans-at-$0 cases,
       // and never falls back to frozen/expired plans such as $0/$560.
-      this.item.text = `${icon} Krill ${money(snapshot.creditBalance, true)}`;
-      this.item.text += dataLabel;
+      this.item.text = `${icon} Krill ${money(snapshot.creditBalance, true)}${dataLabel}`;
     }
 
     const md = new vscode.MarkdownString(undefined, true);

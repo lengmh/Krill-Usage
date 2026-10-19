@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5 (VS Code)
+- Add native email/password sign-in with default SecretStorage retention and optional JWT-only mode.
+- Retry explicit JWT expiration once; pause automatic sign-in after failure.
+- Store each account as one atomic secret record; preserve existing JWT upgrade compatibility.
+- Reconcile password-retention settings on startup and serialize sign-in/refresh ownership.
+- Handle interrupted responses safely and retain all existing lifecycle/host regressions.
+- Codex plugin remains 0.1.4; this release changes only the VS Code extension.
+
 ## 0.1.4
 - Fix account-switch and clear-credential races, including late reads, errors and refresh completion.
 - Join concurrent refreshes and preserve credential-write order.

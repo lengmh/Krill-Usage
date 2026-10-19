@@ -37,7 +37,7 @@
 
 ### 功能
 
-- 手动输入 `krill_jwt`，使用 VS Code `SecretStorage` 保存。
+- 使用邮箱和密码登录，默认在 VS Code `SecretStorage` 记住账号以便 JWT 失效后重新登录；也可关闭密码保存或手动输入 JWT。
 - 默认每 3 分钟查询一次，支持 1–60 分钟刷新间隔。
 - 按 API 返回顺序，显示第一个状态为 active 且仍有额度的套餐。
 - 没有可用 active 套餐时显示账户余额，包括所有 active 套餐额度为 0 的情况。
@@ -50,14 +50,14 @@
 
 需要桌面版 VS Code 1.95 或更新版本。此扩展使用 Node.js API，不支持纯浏览器版 VS Code。
 
-1. 下载 [krill-usage-0.1.4.vsix](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/krill-usage-0.1.4.vsix)。
+1. 下载 [krill-usage-0.1.5.vsix](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-0.1.5.vsix)。
 2. 打开 Extensions，选择右上角 `...` → **Install from VSIX...**，选择下载的 VSIX。
 3. 执行 **Developer: Reload Window**。
 
 也可从命令行安装：
 
 ```powershell
-code --install-extension .\krill-usage-0.1.4.vsix --force
+code --install-extension .\krill-usage-0.1.5.vsix --force
 ```
 
 发布者标识为 `lengmh`。此前手动安装的 `krill-ai.krill-usage` 属于不同扩展标识，请先卸载旧版本，避免两个实例同时轮询。新标识不会自动继承旧标识的 SecretStorage 凭据，需要重新设置 JWT。
@@ -66,25 +66,27 @@ code --install-extension .\krill-usage-0.1.4.vsix --force
 
 `krill_jwt` 是账号登录凭据，不能保证只读权限。请先阅读随包提供的 [PRIVACY.md](PRIVACY.md)，不要公开、截图分享或提交到仓库。
 
-1. 在浏览器中登录 Krill。
-2. 打开开发者工具 → Application → Local Storage → `https://www.krill-code.com`。
-3. 复制 `krill_jwt` 的值。
-4. 在 VS Code 命令面板执行 **Krill: Set JWT**。
-5. 将 JWT 粘贴到密码输入框。
-6. 查询成功后，状态栏显示额度；悬停查看详情，点击立即刷新。
+1. 执行 **Krill: Log In (Email/Password)**，在原生输入框输入邮箱与密码。
+2. 扩展通过 Krill 固定 HTTPS 登录接口取得 JWT，并验证额度接口后保存凭据。
+3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；失败后在当前扩展会话中暂停自动登录，需主动重新登录；重载扩展后可再次尝试。
+4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
-插件只向 `https://www.krill-code.com/api/subscription` 发送 JWT。它不会自动读取浏览器凭据，也不会上传工作区内容。
+本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。密码登录仅适用于 VS Code v0.1.5，Codex 插件仍为 v0.1.4。
 
 ### 命令
 
-- `Krill: Set JWT`：设置或切换账号凭据并查询。
+- `Krill: Log In (Email/Password)`：使用 Krill 邮箱和密码登录。
+- `Krill: Set JWT`：手动设置 JWT，清除此前记住的账号密码。
 - `Krill: Refresh Usage`：立即刷新。
-- `Krill: Clear JWT`：确认后删除保存的凭据并清空本窗口数据。此操作不撤销服务端 JWT，也不注销浏览器登录。
+- `Krill: Clear Credentials`：确认后清除本地凭据和当前窗口数据，不撤销服务端 JWT。
+
+若需要验证码、TOTP 或第三方登录，请先在浏览器正常登录 Krill，再将 Local Storage 中的 `krill_jwt` 粘贴到 **Krill: Set JWT** 的密码框。不要将凭据发送到聊天。
 
 ### 设置
 
 在 Settings 中搜索 `Krill Usage`：
 
+- `krillUsage.rememberPassword`：默认开启，在 SecretStorage 保存邮箱密码；应用级设置，不接受仓库工作区覆盖。
 - `krillUsage.refreshIntervalMinutes`：刷新间隔，默认 `3` 分钟，范围 `1–60`。
 - `krillUsage.showBalanceInStatusBar`：显示套餐时附带账户余额，默认关闭。
 - `krillUsage.statusBarIcon`：状态栏 Codicon，默认 `pulse`。
@@ -97,12 +99,13 @@ code --install-extension .\krill-usage-0.1.4.vsix --force
 
 ### 已知限制与排查
 
-- JWT 过期或无效：重新登录 Krill 并执行 `Krill: Set JWT`。
+- 密码登录尚未使用真实 Krill 账号验证；接口变化或附加验证可能导致失败。可改用 `Krill: Set JWT`。
+- JWT 过期：已记住密码时尝试一次恢复；失败后使用 `Krill: Log In (Email/Password)` 或手动 JWT。
 - 网络错误：恢复连接后点击状态栏重试。
 - Cloudflare 验证：插件会报告验证错误，不自动完成或绕过验证。
 - 查询失败后可能保留上次成功结果，会明确标为旧数据；成功刷新后恢复正常显示。
 - 超过刷新间隔的数据会标为过期。时间显示每分钟更新一次，因此纯时间触发的标记最多有约 1 分钟显示延迟。
-- 多个 VS Code 窗口不会即时同步账号显示。切换或清除凭据后，请刷新或重载其他窗口。
+- 多窗口共享 SecretStorage，但没有跨窗口原子事务。自动恢复提交前会检查账号是否改变，丢弃网络等待期间被其他窗口清除或替换的凭据；仍存在极短的检查到写入竞态。切换或清除凭据前请关闭其他运行本扩展的窗口，操作后再打开，避免重叠写入。
 - 额度和计费以 Krill 服务端为准；接口或登录方式变化可能导致扩展失效。
 - `extensionKind: ["ui"]`：使用 Remote SSH、WSL 或 Dev Container 时优先在本地 UI Extension Host 运行。
 
@@ -174,7 +177,7 @@ xvfb-run -a npm run test:host
 
 有桌面的 macOS 或 Windows 可直接运行 `npm run test:host`。测试会下载 VS Code，在隔离配置和临时扩展副本中运行。HTTP 返回值和交互输入使用合成数据；生产代码、宿主命令、设置与状态栏 API 参与执行。不需要 JWT，也不访问真实 Krill API。
 
-[GitHub Actions](https://github.com/lengmh/Krill-Usage/actions) 对每次主分支提交和 Pull Request 运行 38 项单元/行为回归测试、VSIX 打包检查，以及 VS Code 1.95.0 和 stable 两个版本的扩展宿主测试。宿主 API 断言不等同于深浅色或高对比度主题的像素可读性验收。验证范围见 `TEST_REPORT.md`。
+[GitHub Actions](https://github.com/lengmh/Krill-Usage/actions) 对每次主分支提交和 Pull Request 运行单元/行为回归测试、VSIX 打包检查，以及 VS Code 1.95.0 和 stable 两个版本的扩展宿主测试。宿主 API 断言不等同于深浅色或高对比度主题的像素可读性验收。验证范围见 `TEST_REPORT.md`。
 
 构建 VSIX：
 
@@ -182,7 +185,7 @@ xvfb-run -a npm run test:host
 npm run package
 ```
 
-输出为 `krill-usage-0.1.4.vsix`。CI 不创建 Release，不发布到 Marketplace。
+输出为 `krill-usage-0.1.5.vsix`。CI 不创建 Release，不发布到 Marketplace。
 
 ### Codex
 
@@ -192,6 +195,6 @@ Codex 的依赖、构建与平台打包流程独立于 VS Code 扩展。请在 `
 
 Copyright (c) 2026 MAOHENG LENG (lengmh) and Krill Usage contributors.
 
-0.1.4 使用 GNU GPL v3.0（仅该版本，全文见 `LICENSE`），标识为 `GPL-3.0-only`。允许商业使用；分发本扩展或其修改版本时，应按 GPL 提供相应源码并保留适用的版权、许可证及修改说明。许可证不要求未分发的内部修改向公众公开，也不要求将作者姓名用作衍生产品名称。
+0.1.4 及之后版本使用 GNU GPL v3.0（仅该版本，全文见 `LICENSE`），标识为 `GPL-3.0-only`。允许商业使用；分发本扩展或其修改版本时，应按 GPL 提供相应源码并保留适用的版权、许可证及修改说明。许可证不要求未分发的内部修改向公众公开，也不要求将作者姓名用作衍生产品名称。
 
 `NOTICE` 保留原始版权及 0.1.3 的 MIT 许可声明。已经按 MIT 提供的 0.1.3 不会被追溯改为 GPL。
