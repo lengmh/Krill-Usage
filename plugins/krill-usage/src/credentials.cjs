@@ -36,6 +36,24 @@ async function read() {
 void read();
 `;
 
+// Migration writes are new background vault operations. Keep synchronous native
+// construction/writes out of the MCP process, and never unlock until this child
+// has exited: a timed-out writer must not complete after an owner clear/switch.
+const MIGRATION_WRITE_SCRIPT = `
+process.once("disconnect", () => process.exit(0));
+process.once("message", async value => {
+  try {
+    if (typeof value !== "string" || value.length > ${MAX_SESSION_LENGTH}) throw new Error();
+    const { Entry } = require(process.argv[1]);
+    const entry = new Entry(${JSON.stringify(SERVICE)}, ${JSON.stringify(ACCOUNT)}, { linux: { store: "secret-service" } });
+    await entry.setPassword(value);
+    process.send({ ok: true }, () => process.exit(0));
+  } catch {
+    process.send({ ok: false }, () => process.exit(0));
+  }
+});
+`;
+
 function storageError() {
   return Object.assign(new Error(STORAGE_MESSAGE), { code: "SECRET_STORAGE" });
 }
@@ -96,6 +114,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
   let entry;
   let writes = Promise.resolve();
   let activeRead;
+  let activeWrite;
   let disposed = false;
 
   function checkPrivate(stat, isDirectory) {
@@ -228,9 +247,55 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return operation.promise;
   }
 
+  function writeMigrationVault(value) {
+    if (disposed || activeWrite) return Promise.reject(storageError());
+    return new Promise((resolve, reject) => {
+      let child, timer, received = false, failed = false, settled = false;
+      const operation = { cancel: null };
+      activeWrite = operation;
+      const fail = () => {
+        if (settled) return;
+        failed = true;
+        try { child?.kill("SIGKILL"); } catch {}
+        // The close event, not a timer or IPC acknowledgement, releases the
+        // writer lock. A native task may still be running until process death.
+      };
+      operation.cancel = fail;
+      timer = setTimeout(fail, READ_TIMEOUT_MS);
+      try {
+        child = spawn(process.execPath, ["-e", MIGRATION_WRITE_SCRIPT, require.resolve("@napi-rs/keyring")], {
+          shell: false, windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"]
+        });
+        child.on("error", fail);
+        child.on("message", message => {
+          if (settled || failed) return;
+          if (received || message?.ok !== true) { fail(); return; }
+          received = true;
+        });
+        child.once("close", (code, signal) => {
+          settled = true;
+          clearTimeout(timer);
+          if (activeWrite === operation) activeWrite = null;
+          if (failed || code !== 0 || signal || !received) reject(storageError());
+          else resolve();
+        });
+        child.send(value, error => { if (error) fail(); });
+      } catch {
+        if (child) fail();
+        else {
+          settled = true;
+          clearTimeout(timer);
+          activeWrite = null;
+          reject(storageError());
+        }
+      }
+    });
+  }
+
   function dispose() {
     disposed = true;
     activeRead?.cancel();
+    activeWrite?.cancel();
   }
 
   async function readRevision() {
@@ -274,7 +339,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
         if (migrate) {
           // Re-read under the writer lock: a previously observed legacy account
           // is not permission to overwrite a later remembered login or clear.
-          const raw = await getEntry().getPassword();
+          const raw = Entry || entryFactory ? await getEntry().getPassword() : await readVault(expectedRevision);
           const marker = readMarker();
           if (disposed || (isCurrent && !isCurrent()) || marker.phase !== "ready" || marker.revision !== expectedRevision) {
             conflict = Object.assign(new Error("Credentials changed. Please retry account setup."), { code: "CREDENTIAL_CHANGED" });
@@ -286,12 +351,13 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
         }
         const changingRevision = writeMarker("changing");
         if (value === null) await getEntry().deletePassword();
+        else if (migrate && !Entry && !entryFactory) await writeMigrationVault(value);
         else await getEntry().setPassword(value);
         if (migrate) {
           // Never advertise clean storage after a partial or silently failed
           // vault write. An interrupted migration leaves the marker fail-closed.
           if (disposed || (isCurrent && !isCurrent())) throw storageError();
-          const saved = await getEntry().getPassword();
+          const saved = Entry || entryFactory ? await getEntry().getPassword() : await readVault(changingRevision);
           if (disposed || (isCurrent && !isCurrent())) throw storageError();
           const marker = readMarker();
           if (saved !== value || marker.phase !== "changing" || marker.revision !== changingRevision) throw storageError();
