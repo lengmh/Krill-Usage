@@ -5,8 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-const repo='lengmh/Krill-Usage', version='0.1.4', tag=`v${version}`;
-const originalTag='606567f6110e4bff1020d089d4a30807802bffb5';
+const repo='lengmh/Krill-Usage', version='0.1.5', tag=`v${version}`;
+const originalTag='c74467518c35eaacba1ac5d7c588af1e97fac22d';
 assert.equal(process.env.GITHUB_REPOSITORY,repo);
 assert.equal(process.env.GITHUB_EVENT_NAME,'workflow_dispatch');
 assert.equal(process.env.GITHUB_REF,'refs/heads/main');
@@ -18,7 +18,7 @@ const get=(resource)=>JSON.parse(gh('api',`repos/${repo}/${resource}`));
 const release=get(`releases/tags/${tag}`);
 assert.equal(release.draft,false); assert.equal(release.immutable,false);
 assert.equal(get(`git/ref/tags/${tag}`).object.sha,originalTag);
-const marker='<!-- krill-codex-v0.1.4 -->';
+const marker='<!-- krill-codex-v0.1.5 -->';
 assert.ok(!release.body?.includes(marker),'Codex release notes already exist; inspect before retrying.');
 
 const output='release-assets'; mkdirSync(output,{recursive:true});
@@ -50,7 +50,7 @@ for(const platform of platforms) {
 const sourceName=`krill-usage-codex-${version}-source.zip`;
 execFileSync('git',['archive','--format=zip',`--prefix=krill-usage-codex-${version}-source/`,`--output=${output}/${sourceName}`,sourceCommit]);
 assets.push({filename:sourceName,sha256:createHash('sha256').update(readFileSync(`${output}/${sourceName}`)).digest('hex')});
-const manifestName='CODEX-RELEASE.json';
+const manifestName='CODEX-RELEASE-0.1.5.json';
 writeFileSync(`${output}/${manifestName}`,JSON.stringify({version,sourceCommit,tag,originalTagCommit:originalTag,workflowRun:`https://github.com/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`,assets},null,2)+'\n');
 assets.push({filename:manifestName,sha256:createHash('sha256').update(readFileSync(`${output}/${manifestName}`)).digest('hex')});
 const checksums=`SHA256SUMS-codex-${version}`;
@@ -58,11 +58,11 @@ writeFileSync(`${output}/${checksums}`,assets.map(a=>`${a.sha256}  ${a.filename}
 const names=[...assets.map(a=>a.filename),checksums];
 for(const name of names) assert.ok(!release.assets.some(a=>a.name===name),`Asset ${name} exists; no overwrite allowed.`);
 
-const notes=`\n\n${marker}\n## Codex plugin 0.1.4 (added 2026-10-09)\n\n`+
-`Local MCP App dashboard with manual refresh, quota/balance/reset information and nonsecret settings. Installation acceptance was reported as passed by the user; OS, desktop build and individual acceptance checks were not recorded. This does not assert all-platform desktop or native-vault certification.\n\n`+
-`Download the matching win32-x64, darwin-arm64 or linux-x64 Codex archive. Extract it, enter the krill-usage-codex directory and run \`codex plugin marketplace add .\`. Restart Codex and install Krill Usage from Krill Usage Local. Node.js 22+ is required. New/replacement JWT entry is supported only on Windows 10/11 with .NET Framework 4.8+ through a native password window; macOS/Linux cannot add new credentials. Never put JWT in chat, terminal input, arguments or ordinary settings. [Installation and credential instructions](https://github.com/${repo}/blob/${sourceCommit}/plugins/krill-usage/README.md).\n\n`+
+const notes=`\n\n${marker}\n## Codex plugin 0.1.5 (added 2026-10-19)\n\n`+
+`Adds Windows native account/password login, optional OS-vault password remembering, one-shot JWT-expiry recovery and atomic single-record credential storage. JWT-only setup remains available. Tests use synthetic data only; actual Krill login, native-vault behavior and Codex desktop acceptance for this version still require verification on the target computer.\n\n`+
+`Download the matching win32-x64, darwin-arm64 or linux-x64 Codex archive. Extract it, enter the krill-usage-codex directory and run \`codex plugin marketplace add .\`. Restart Codex and install Krill Usage from Krill Usage Local. Node.js 22+ is required. Account/password login and new/replacement JWT entry are supported only on Windows 10/11 with .NET Framework 4.8+ through a native password window; remembering uses the existing OS vault with no plaintext fallback; macOS/Linux cannot add new credentials. Never put credentials in chat, terminal input, arguments or ordinary settings. [Installation and credential instructions](https://github.com/${repo}/blob/${sourceCommit}/plugins/krill-usage/README.md).\n\n`+
 `Codex packages and the separate \`${sourceName}\` were built from [${sourceCommit}](https://github.com/${repo}/commit/${sourceCommit}); [platform build/test run](https://github.com/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}). \`${checksums}\` covers these new files and \`${manifestName}\` records their provenance.\n\n`+
-`The existing v0.1.4 tag, VS Code VSIX, original source ZIP and SHA256SUMS are unchanged at ${originalTag}. GitHub's automatic “Source code” links still refer to that original tag and do not contain the Codex plugin. Use the separate Codex source ZIP for corresponding source. No Visual Studio Marketplace publication is changed.\n`;
+`The existing v0.1.5 tag, VS Code VSIX, original source ZIP and SHA256SUMS are unchanged at ${originalTag}. GitHub's automatic “Source code” links still refer to that original tag and do not contain this Codex 0.1.5 update. Use the separate Codex source ZIP for corresponding source. No Visual Studio Marketplace publication is changed.\n`;
 writeFileSync('release-notes.md',(release.body||'')+notes);
 // No --clobber: even a concurrent upload cannot replace an existing asset.
 gh('release','upload',tag,...names.map(name=>`${output}/${name}`),'--repo',repo);

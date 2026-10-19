@@ -15,8 +15,9 @@ test('MCP discovery exposes native settings, all entrypoints, complete HTML and 
  const tool=tools.tools.find(x=>x.name===name);assert.equal(tool._meta.ui.resourceUri,UI_URI);assert.deepEqual(tool._meta['openai/ui'].entrypoints,[{type}]);
  }
  for(const name of ['krill.usage','krill.panel','krill.refresh']){
- assert.deepEqual(tools.tools.find(x=>x.name===name).annotations,{readOnlyHint:true,destructiveHint:false,openWorldHint:false},name);
+ assert.deepEqual(tools.tools.find(x=>x.name===name).annotations,{readOnlyHint:false,destructiveHint:false,openWorldHint:false},name);
  }
+ for(const name of ['krill.read','krill.settings']) assert.equal(tools.tools.find(x=>x.name===name).annotations.readOnlyHint,true);
  assert.deepEqual(tools.tools.find(x=>x.name==='krill.refresh')._meta.ui.visibility,['app']);
  assert.ok(client.getServerCapabilities().experimental['openai/settings']);
  const native=await client.callTool({name:'settings.read',arguments:{}});assert.equal(native.structuredContent.values.refreshIntervalMinutes,3);

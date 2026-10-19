@@ -136,6 +136,47 @@ internal static class CredentialPromptHarness
         Check(!window.IsVisible && window.Input.Password == "", "Parent cancellation clears and closes UI.");
     }
 
+    private static void LoginSuite()
+    {
+        var window = new CredentialWindow(true);
+        window.Show();
+        Pump();
+        Check(window.RememberPassword.IsChecked == true, "Remember password defaults to checked.");
+        window.Account.Text = " synthetic@example.invalid ";
+        Paste(window, "synthetic-\\-\"-password");
+        Check(window.Save.IsEnabled && window.TakeAccepted() == null, "Login paste enables explicit submit without submitting.");
+        Check(PressKey(window, Key.Enter).Handled && window.IsVisible, "Login Enter cannot submit.");
+        window.RememberPassword.IsChecked = false;
+        Click(window.Save);
+        Check(window.TakeAccepted() == CredentialRules.LoginJson("synthetic@example.invalid", "synthetic-\\-\"-password", false), "Login JSON preserves password and explicit vault choice.");
+        Check(window.Account.Text == "" && window.Input.Password == "", "Close clears account and password controls.");
+        foreach (string bad in new string[] { "bad\r\n", "bad\u0085", new string('x', CredentialRules.MaximumPasswordLength + 1) })
+        {
+            window = new CredentialWindow(true);
+            window.Show();
+            window.Account.Text = "synthetic@example.invalid";
+            Paste(window, bad);
+            Check(!window.Save.IsEnabled && window.Input.Password == "", "Login rejects whole invalid password paste.");
+            Click(window.Save);
+            Check(window.IsVisible && window.TakeAccepted() == null, "Invalid login cannot submit.");
+            window.Close();
+        }
+        window = new CredentialWindow(true);
+        window.Show();
+        Paste(window, "synthetic-password");
+        var data = new DataObject();
+        data.SetData(DataFormats.UnicodeText, "bad\naccount", false);
+        var paste = new DataObjectPastingEventArgs(data, false, DataFormats.UnicodeText);
+        window.Account.RaiseEvent(paste);
+        Check(paste.CommandCancelled && window.Account.Text == "" && !window.Save.IsEnabled, "Account whole paste rejects controls.");
+        window.Account.Text = new string('x', CredentialRules.MaximumAccountLength + 1);
+        Check(window.Account.Text == "" && !window.Save.IsEnabled, "Overlong account is cleared, never truncated.");
+        window.Account.Text = "synthetic@example.invalid";
+        window.CancelForParent();
+        Click(window.Save);
+        Check(window.TakeAccepted() == null && !window.IsVisible, "Parent cancellation wins over login submit.");
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -143,8 +184,9 @@ internal static class CredentialPromptHarness
         {
             if (args.Length == 1 && args[0] == "guard") return CredentialProgram.HasProtocolPipes() ? 0 : 3;
             var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            if (args.Length == 1 && (args[0] == "flow-save" || args[0] == "flow-cancel"))
+            if (args.Length == 1 && (args[0] == "flow-save" || args[0] == "flow-cancel" || args[0] == "flow-login-save" || args[0] == "flow-login-cancel"))
             {
+                bool login = args[0].StartsWith("flow-login-");
                 Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(delegate {
                     Check(application.Windows.Count == 1, "Production entry point must open one credential window.");
                     var window = (CredentialWindow)application.Windows[0];
@@ -152,12 +194,13 @@ internal static class CredentialPromptHarness
                     window.Input.Focus();
                     Pump();
                     Check(window.Input.IsKeyboardFocused, "Production flow requires a focused PasswordBox on an interactive desktop.");
+                    if (login) window.Account.Text = "synthetic@example.invalid";
                     Paste(window, Token + "\u00e9");
-                    Click(args[0] == "flow-save" ? window.Save : window.Cancel);
+                    Click(args[0].EndsWith("-save") ? window.Save : window.Cancel);
                 }));
                 // Invoke the actual production entry point in this separately
                 // compiled harness. The shipped EXE has no test argument or hook.
-                return (int)typeof(CredentialProgram).GetMethod("Main", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null);
+                return (int)typeof(CredentialProgram).GetMethod("Main", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { login ? new string[] { "--login" } : new string[0] });
             }
             if (args.Length == 1 && args[0] == "parent-eof")
             {
@@ -169,6 +212,7 @@ internal static class CredentialPromptHarness
             }
             if (args.Length != 0) return 2;
             Suite();
+            LoginSuite();
             Console.WriteLine("Synthetic PasswordBox checks passed: " + assertions);
             return 0;
         }

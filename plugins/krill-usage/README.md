@@ -1,10 +1,10 @@
 # Krill Usage for Codex
 
-非官方 Krill 额度面板。本地 Node.js stdio MCP 服务提供打包的 HTML/JavaScript 界面、侧栏入口、会话面板和设置入口。JWT 由账户本人通过 Windows 原生密码窗口写入操作系统凭据库，不通过终端、聊天、MCP 参数或普通设置传入。
+非官方 Krill 额度面板。本地 Node.js stdio MCP 服务提供打包的 HTML/JavaScript 界面、侧栏入口、会话面板和设置入口。邮箱、密码或 JWT 由账户本人通过 Windows 原生窗口输入；仅使用操作系统凭据库保存登录凭据，不通过终端、聊天、MCP 参数或普通设置传入。
 
-Codex 插件版本为 `0.1.4`，作为现有 `v0.1.4` Release 的新增发布文件提供。安装验收情况见[桌面宿主验收与复核](#桌面宿主验收与复核)。
+Codex 插件版本为 `0.1.5`，作为现有 `v0.1.5` Release 的新增发布文件提供。安装验收情况见[桌面宿主验收与复核](#桌面宿主验收与复核)。
 
-同仓库还提供 VS Code `0.1.4` 扩展，安装与状态栏设置见[仓库首页](https://github.com/lengmh/Krill-Usage#readme)。两个客户端分别保存凭据。
+同仓库还提供 VS Code `0.1.5` 扩展，安装与状态栏设置见[仓库首页](https://github.com/lengmh/Krill-Usage#readme)。两个客户端分别保存凭据。
 
 ## 功能与边界
 
@@ -22,32 +22,32 @@ Codex 插件版本为 `0.1.4`，作为现有 `v0.1.4` Release 的新增发布文
 - Node.js 22+ 在桌面应用启动环境的 PATH 中可用。
 - 支持 `codex plugin marketplace add` 的 Codex CLI，且终端中可以运行 `codex` 命令。Node.js 本身不包含 Codex CLI。
 - macOS Keychain、Windows Credential Manager，或 Linux Secret Service。Linux 必须有可用且解锁的 Secret Service；不回退到明文或临时内核存储。
-- 新增或替换 JWT 暂只支持 Windows 10/11 与 .NET Framework 4.8 或更高的 4.x 版本。macOS/Linux 仍可使用已存凭据、清除凭据和恢复锁，但 `set` 会拒绝操作；旧终端 JWT 输入已停用。
+- 邮箱密码登录及新增或替换 JWT 暂只支持 Windows 10/11 与 .NET Framework 4.8 或更高的 4.x 版本。macOS/Linux 仍可使用已存凭据、清除凭据和恢复锁，但 `set` 会拒绝操作；旧终端 JWT 输入已停用。
 - 打包产物必须与操作系统、CPU 架构匹配；原生凭据库模块不能跨平台复制使用。
 
 Windows 运行条件参考 Microsoft 的 [.NET Framework 安装与系统版本说明](https://learn.microsoft.com/en-us/dotnet/framework/install/on-windows-and-server)。密码窗口使用 WPF 的 [粘贴前检查事件](https://learn.microsoft.com/en-us/dotnet/api/system.windows.dataobject.pasting?view=netframework-4.8.1)，不启动 PowerShell 脚本。
 
 ## 从平台包安装
 
-从本仓库的 [v0.1.4 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.4) 下载目标系统与 CPU 架构对应的平台包，以及 [SHA256SUMS-codex-0.1.4](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/SHA256SUMS-codex-0.1.4) 校验文件：
+从本仓库的 [v0.1.5 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.5) 下载目标系统与 CPU 架构对应的平台包，以及 [SHA256SUMS-codex-0.1.5](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/SHA256SUMS-codex-0.1.5) 校验文件：
 
-- Windows x64：[krill-usage-codex-0.1.4-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/krill-usage-codex-0.1.4-win32-x64.tar.gz)
-- macOS Apple Silicon：[krill-usage-codex-0.1.4-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/krill-usage-codex-0.1.4-darwin-arm64.tar.gz)
-- Linux x64：[krill-usage-codex-0.1.4-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/krill-usage-codex-0.1.4-linux-x64.tar.gz)
+- Windows x64：[krill-usage-codex-0.1.5-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-win32-x64.tar.gz)
+- macOS Apple Silicon：[krill-usage-codex-0.1.5-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-darwin-arm64.tar.gz)
+- Linux x64：[krill-usage-codex-0.1.5-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-linux-x64.tar.gz)
 
 平台包包含运行所需的 JavaScript 和对应平台的原生凭据库模块，无需安装 npm 依赖；仍需满足前述 Node.js、系统凭据库及 Windows 密码窗口运行条件。macOS/Linux 包仅支持使用已存凭据，不提供首次设置或替换 JWT 的回退方式。
 
 1. 在下载目录校验平台包。Windows PowerShell 示例：
 
    ```powershell
-   Get-FileHash .\krill-usage-codex-0.1.4-win32-x64.tar.gz -Algorithm SHA256
+   Get-FileHash .\krill-usage-codex-0.1.5-win32-x64.tar.gz -Algorithm SHA256
    ```
 
-   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.4` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
+   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.5` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
 2. 校验一致后解压。Windows 示例：
 
    ```powershell
-   tar -xzf krill-usage-codex-0.1.4-win32-x64.tar.gz
+   tar -xzf krill-usage-codex-0.1.5-win32-x64.tar.gz
    ```
 
    其他平台将文件名替换为下载的对应平台包。保留解压后的完整 `krill-usage-codex` 目录，其结构包括：
@@ -67,7 +67,7 @@ Windows 运行条件参考 Microsoft 的 [.NET Framework 安装与系统版本�
 
 4. 重启桌面应用。在 Plugins Directory 中选择「Krill Usage Local」，安装 `krill-usage`，然后打开新会话。
 5. 从侧栏或会话面板入口打开 Krill Usage。如果没有显示扩展入口，可执行 `Open Krill Usage` 打开关联的 MCP App，并记录桌面版本进行复核。
-6. Windows 用户继续执行下方[本地账户设置](#本地账户设置)，在原生密码窗口输入 JWT，然后回到面板刷新。
+6. Windows 用户继续执行下方[本地账户设置](#本地账户设置)，在原生窗口登录或输入 JWT，然后回到面板刷新。
 
 不要只取出 `plugins/krill-usage` 后在其中注册 marketplace；注册位置必须包含 `.agents/plugins/marketplace.json`。宿主可能使用安装缓存，更新方法见下方说明。
 
@@ -103,7 +103,17 @@ Windows 运行条件参考 Microsoft 的 [.NET Framework 安装与系统版本�
 
 `krill_jwt` 是账户登录凭据，不保证只读权限。先阅读 [PRIVACY.md](PRIVACY.md)。本步骤必须由账户本人操作，不要让助手输入、查看或代存真实 JWT。
 
-本节的 `set` 仅支持 Windows。其他系统没有终端、文件或环境变量回退；不要手工修改凭据库条目来绕过修订标记。
+本节的 `login` 和 `set` 仅支持 Windows。其他系统没有终端、文件或环境变量回退；不要手工修改凭据库条目来绕过修订标记。
+
+### 邮箱和密码登录（推荐）
+
+在本人交互式终端进入插件目录，运行 `node dist/credential-cli.cjs login`。邮箱和密码只在 Windows 原生窗口输入，先验证登录及额度接口成功，再保存凭据。邮箱和密码通过固定 HTTPS 地址 `https://www.krill-code.com/api/auth/login` 发送给 Krill。不要把密码发送给助手或写进命令。
+
+窗口默认勾选「记住密码」，确认后将 JWT、邮箱及密码作为一条记录存入现有系统凭据库。取消勾选时不保存密码，同时替换此前记录中的密码；邮箱仅随 JWT 保存在同一凭据库中。凭据库不可用时保存失败，无文件、环境变量或终端回退。密码不会出现在 MCP 参数、结果或日志中。
+
+额度接口明确返回未授权时，已记住密码的账户会尝试一次重新登录并重试额度查询；恢复失败后当前服务实例暂停该凭据版本的自动登录，需重新运行登录命令或重启服务。需要 TOTP、验证码或第三方登录时，改用下方 JWT 方式。切换账户直接再次运行 `login`；清除命令同时删除 JWT、邮箱和密码。登录期间其他进程变更了凭据时，迟到的登录结果不会覆盖新状态。
+
+### 仅保存 JWT
 
 1. 在自己的浏览器中登录 `https://www.krill-code.com`。
 2. 在开发者工具的 Application → Local Storage 中找到该站点的 `krill_jwt`。不要发送到聊天或截图。
@@ -120,7 +130,7 @@ Windows 运行条件参考 Microsoft 的 [.NET Framework 安装与系统版本�
 
 粘贴校验针对 Windows 剪贴板返回的完整文本，在密码控件插入或截断之前执行。Windows 的 [CF_UNICODETEXT 格式](https://learn.microsoft.com/en-us/windows/win32/dataxchg/standard-clipboard-formats) 在第一个 NUL 处结束；程序无法从已转换的文本中判断该终止符后是否还存在原始数据，因此不承诺检测格式外的字节。窗口输入不会成为终端或 shell 输入。
 
-凭据库使用 service `com.krill-usage.codex`、account `krill_jwt`，与 VS Code SecretStorage 分离。凭据变更前后会更新仅含随机修订号和状态的本地标记，服务丢弃旧账户的迟到请求。其他界面中已经显示的数据需刷新或重新打开。
+旧版单 JWT 记录仍可读取；再次设置 JWT 会去除此前保存的邮箱和密码。凭据库使用 service `com.krill-usage.codex`、account `krill_jwt`，与 VS Code SecretStorage 分离。凭据变更前后会更新仅含随机修订号和状态的本地标记，服务丢弃旧账户的迟到请求。其他界面中已经显示的数据需刷新或重新打开。
 
 MCP 服务在短期本地子进程中初始化并读取系统凭据库，读取总时限为 5 秒。凭据库锁定或无响应时，查询失败并结束该读取进程，MCP 仍可处理其他请求；解锁凭据库后可再次刷新。写入与清除仍按原有锁和修订标记流程完成，不对写入使用提前释放锁的超时处理。
 
@@ -130,7 +140,7 @@ MCP 服务在短期本地子进程中初始化并读取系统凭据库，读取�
 node dist/credential-cli.cjs clear --confirm-clear
 ```
 
-`--confirm-clear` 表示确认删除本地 JWT，并使旧账户数据失效；此操作不撤销服务端 JWT，也不注销浏览器。命令不再等待终端输入，缺少确认参数时会提示完整命令并退出，不访问凭据库。确认参数不含秘密；不要在任何参数中附加 JWT。
+`--confirm-clear` 表示确认删除本地 JWT、邮箱和密码，并使旧账户数据失效；此操作不撤销服务端 JWT，也不注销浏览器。命令不再等待终端输入，缺少确认参数时会提示完整命令并退出，不访问凭据库。确认参数不含秘密；不要在任何参数中附加 JWT。
 
 ### 凭据写入锁恢复
 
@@ -178,13 +188,13 @@ npm test
 npm run package
 ```
 
-`artifacts/krill-usage-codex-0.1.4-<platform>-<arch>.tar.gz` 包含本地 marketplace、服务器、界面、当前平台凭据库二进制和许可证；Windows 产物另含从本仓库源码编译的密码窗口程序。解压根目录为 `krill-usage-codex`，其中包含 `.agents/plugins/marketplace.json` 和完整的 `plugins/krill-usage` 插件目录，可直接按前述平台包流程注册。无需安装 npm 依赖，但仍需 Node.js 22+，Windows 密码窗口还需前述 .NET Framework。本地构建和 Actions 产物附带 `.tar.gz.sha256`；GitHub Release 使用汇总校验文件 `SHA256SUMS-codex-0.1.4`。
+`artifacts/krill-usage-codex-0.1.5-<platform>-<arch>.tar.gz` 包含本地 marketplace、服务器、界面、当前平台凭据库二进制和许可证；Windows 产物另含从本仓库源码编译的密码窗口程序。解压根目录为 `krill-usage-codex`，其中包含 `.agents/plugins/marketplace.json` 和完整的 `plugins/krill-usage` 插件目录，可直接按前述平台包流程注册。无需安装 npm 依赖，但仍需 Node.js 22+，Windows 密码窗口还需前述 .NET Framework。本地构建和 Actions 产物附带 `.tar.gz.sha256`；GitHub Release 使用汇总校验文件 `SHA256SUMS-codex-0.1.5`。
 
 开发测试只使用合成数据和注入式凭据库替身，不读取或保存真实凭据，也不访问真实 Krill API。新增 CI 在 Linux、Windows、macOS 构建检查插件；Windows 专项测试使用实际密码控件和模拟剪贴板内容检查整段粘贴、确认及取消。CI 中的控件测试不等于使用者电脑或 Codex 桌面宿主验收。原有 VS Code CI 保持不变。
 
 ### 桌面宿主验收与复核
 
-使用者已报告安装验收通过，但未提供操作系统、CPU 架构、桌面版本或逐项结果；这不代表全平台与以下场景均已通过。下面的清单用于补充记录，以及在新平台或桌面版本上复核。
+旧版使用者已报告安装验收通过，但本次登录更新尚未完成真实账户与桌面宿主验收；旧版也未提供操作系统、CPU 架构、桌面版本或逐项结果；这不代表全平台与以下场景均已通过。下面的清单用于补充记录，以及在新平台或桌面版本上复核。
 
 - 记录操作系统、CPU、桌面版本和 Node.js 版本，从本地 marketplace 安装。
 - 检查侧栏、会话面板、设置入口与 HTML 界面。
@@ -197,9 +207,9 @@ npm run package
 
 ## 发布文件与对应源码
 
-现有 `v0.1.4` 标签及 VS Code VSIX 保持原样，标签仍指向 `606567f`。GitHub 自动附带的「Source code (zip)」和「Source code (tar.gz)」来自该标签，是原有 VS Code 源码，不包含本次 Codex 实现，不能用于复现这些 Codex 平台包。
+现有 `v0.1.5` 标签及 VS Code VSIX 保持原样，标签仍指向 `c744675`。GitHub 自动附带的「Source code (zip)」和「Source code (tar.gz)」来自该标签，是原有 VS Code 源码，不包含本次 Codex 0.1.5 更新，不能用于复现这些 Codex 平台包。
 
-本次 Codex 平台包的完整对应源码通过同一 Release 中单独的 [krill-usage-codex-0.1.4-source.zip](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.4/krill-usage-codex-0.1.4-source.zip) 提供，包含新增 Codex 发布提交的完整仓库。准确提交记录在发布说明和 `CODEX-RELEASE.json` 中。`SHA256SUMS-codex-0.1.4` 汇总 Codex 发布文件的校验值；原有源码 ZIP 和 `SHA256SUMS` 保持原样。
+本次 Codex 平台包的完整对应源码通过同一 Release 中单独的 [krill-usage-codex-0.1.5-source.zip](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-source.zip) 提供，包含新增 Codex 发布提交的完整仓库。准确提交记录在发布说明和 `CODEX-RELEASE-0.1.5.json` 中。`SHA256SUMS-codex-0.1.5` 汇总 Codex 发布文件的校验值；原有源码 ZIP 和 `SHA256SUMS` 保持原样。
 
 构建需要仓库内共享的 `src/model.js`、`src/jwt.js` 和根目录许可证文件，应保留完整源码结构，不要只下载插件子目录。
 

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-const { promptCredential } = createRequire(import.meta.url)('../src/credential-prompt.cjs');
+const { promptCredential, promptLogin } = createRequire(import.meta.url)('../src/credential-prompt.cjs');
 import { compileCredentialHelper } from '../scripts/build-credential-helper.mjs';
 
 const windows = process.platform === 'win32';
@@ -20,15 +20,16 @@ test('Windows production PasswordBox handles whole paste, explicit Save, cancell
   assert.equal(suite.status, 0, suite.stderr);
   assert.match(suite.stdout, /Synthetic PasswordBox checks passed:/u);
 
-  for (const mode of ['flow-save', 'flow-cancel']) {
+  for (const mode of ['flow-save', 'flow-cancel', 'flow-login-save', 'flow-login-cancel']) {
     let flowChild;
     const timer = setTimeout(() => flowChild?.kill(), 10_000);
     try {
-      const result = promptCredential({ spawnHelper(_file, _args, options) {
+      const result = (mode.startsWith('flow-login-') ? promptLogin : promptCredential)({ spawnHelper(_file, _args, options) {
         flowChild = spawn(harness, [mode], options);
         return flowChild;
       } });
       if (mode === 'flow-save') assert.equal(await result, 'synthetic-window-tokené');
+      else if (mode === 'flow-login-save') assert.deepEqual(await result, { account: 'synthetic@example.invalid', password: 'synthetic-window-tokené', rememberPassword: true });
       else await assert.rejects(result, { code: 'CANCELLED' });
     } finally { clearTimeout(timer); flowChild?.kill(); }
   }

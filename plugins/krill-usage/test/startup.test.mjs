@@ -97,8 +97,8 @@ for (const lateFailure of [false, true]) {
 
 test('actual marker changes during the vault read fail closed before any GET', async t => {
   const { service, credentials, calls, setAccount } = fixture(t, true);
-  const read = credentials.read;
-  credentials.read = async () => {
+  const read = credentials.readSession;
+  credentials.readSession = async () => {
     const jwt = await read();
     setAccount('synthetic-account-b');
     return jwt;
