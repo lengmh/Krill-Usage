@@ -4,7 +4,7 @@ import {
   quotaTone, statusText, planTypeText, dateText, countdown, validatePreferences
 } from './view.mjs';
 
-const CREDENTIAL_COMMAND = 'node dist/credential-cli.cjs set';
+const CREDENTIAL_COMMAND = 'node dist/credential-cli.cjs login';
 
 function element(doc, tag, className, text) {
   const node = doc.createElement(tag);
@@ -126,7 +126,7 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
 
   function createSetup() {
     const box = el('aside', 'setup-card');
-    box.append(el('h2', '', '本机凭证'), el('p', 'muted', '在你自己的终端中，进入插件目录并运行以下命令，打开 Windows 原生凭据窗口：'), el('code', 'setup-command', CREDENTIAL_COMMAND), el('p', 'setup-warning', '只在原生窗口中输入 JWT，不要粘贴到终端、聊天或面板设置中。'));
+    box.append(el('h2', '', '本机凭证'), el('p', 'muted', '在你自己的终端中，进入插件目录并运行以下命令，打开 Windows 原生凭据窗口：'), el('code', 'setup-command', CREDENTIAL_COMMAND), el('p', 'setup-warning', '只在原生窗口中输入邮箱和密码。默认在系统凭据库记住密码用于到期恢复；取消勾选则只保存 JWT。也可运行 node dist/credential-cli.cjs set 手动设置 JWT。不要把凭据粘贴到终端、聊天或面板设置中。'));
     box.append(el('p', 'muted tiny', '新增或替换凭证暂仅支持 Windows。更新后，点击刷新或关闭并重新打开面板。'));
     return box;
   }
@@ -396,5 +396,5 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
   const root = document.getElementById('app') ?? document.body.appendChild(document.createElement('div'));
   root.id = 'app';
   // A component fixture may mount an explicit bridge instead of connecting to a host.
-  if (!root.hasAttribute('data-manual-mount')) mountKrillApp({ app: new App({ name: 'Krill Usage', version: '0.1.4' }, {}, { autoResize: true }), root });
+  if (!root.hasAttribute('data-manual-mount')) mountKrillApp({ app: new App({ name: 'Krill Usage', version: '0.1.5' }, {}, { autoResize: true }), root });
 }

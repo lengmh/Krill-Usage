@@ -34,7 +34,7 @@ async function collect(dir, prefix='') {
 await collect('node_modules');
 await mkdir(path.join(root,'.agents/plugins'),{recursive:true});
 await cp('../../.agents/plugins/marketplace.json',path.join(root,'.agents/plugins/marketplace.json'));
-await writeFile(path.join(root,'README.md'),'# Krill Usage for Codex\n\nRequires Node.js 22+. From this directory run `codex plugin marketplace add .`, restart Codex, then install Krill Usage from Krill Usage Local.\n\nSee [installation, platform requirements and credential setup](plugins/krill-usage/README.md). New JWT entry is Windows-only.\n');
+await writeFile(path.join(root,'README.md'),'# Krill Usage for Codex\n\nRequires Node.js 22+. From this directory run `codex plugin marketplace add .`, restart Codex, then install Krill Usage from Krill Usage Local.\n\nSee [installation, platform requirements and credential setup](plugins/krill-usage/README.md). Account/password login and new JWT entry are Windows-only.\n');
 // CI supplies the exact checkout commit. A local/source-ZIP build may have no Git metadata.
 const sourceCommit=process.env.GITHUB_SHA || null;
 await writeFile(path.join(root,'BUILD-INFO.json'),JSON.stringify({version,sourceCommit,platform:process.platform,arch:process.arch},null,2)+'\n');

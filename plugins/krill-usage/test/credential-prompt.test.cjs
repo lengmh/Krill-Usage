@@ -4,17 +4,17 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 const path = require("node:path");
-const { promptCredential, validateRawCredential, MAX_OUTPUT_BYTES, MAX_CREDENTIAL_LENGTH } = require("../src/credential-prompt.cjs");
+const { promptLogin, validateLoginCredentials, MAX_PASSWORD_LENGTH, MAX_ACCOUNT_LENGTH, MAX_LOGIN_OUTPUT_BYTES, promptCredential, validateRawCredential, MAX_OUTPUT_BYTES, MAX_CREDENTIAL_LENGTH } = require("../src/credential-prompt.cjs");
 
 const TOKEN = "synthetic-window-token";
 const turn = () => new Promise(resolve => setImmediate(resolve));
-function fixture() {
+function fixture(prompt = promptCredential) {
   const child = new EventEmitter();
   Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), killed: false });
   child.kill = () => { child.killed = true; setImmediate(() => child.emit("close", null, "SIGTERM")); };
   const signals = new EventEmitter();
   let request;
-  const result = promptCredential({ platform: "win32", signals, spawnHelper(...args) { request = args; return child; } });
+  const result = prompt({ platform: "win32", signals, spawnHelper(...args) { request = args; return child; } });
   async function complete(code = 0) {
     child.stdout.end(); child.stderr.end();
     await turn();
@@ -98,5 +98,47 @@ test("helper launch errors and unavailable platforms fail closed without reading
   await assert.rejects(promptCredential({ platform: "win32", spawnHelper() { throw new Error(TOKEN); } }), error => sanitized(error, "PROMPT_UNAVAILABLE"));
   for (const platform of ["linux", "darwin"]) {
     await assert.rejects(promptCredential({ platform, spawnHelper() { assert.fail("must not launch"); } }), { code: "PROMPT_UNSUPPORTED" });
+  }
+});
+
+const LOGIN = { account: "synthetic@example.invalid", password: 'synthetic-\\-"-passwordé', rememberPassword: true };
+test("login adapter uses only a fixed mode argument and returns a validated login object", async () => {
+  const f = fixture(promptLogin);
+  assert.deepEqual(f.request[1], ["--login"]);
+  assert.deepEqual(f.request[2], { shell: false, windowsHide: false, stdio: ["pipe", "pipe", "pipe"] });
+  assert.equal(f.child.stdin.readableLength, 0);
+  const bytes = Buffer.from(JSON.stringify(LOGIN));
+  for (const byte of bytes) f.child.stdout.write(Buffer.from([byte]));
+  await f.complete();
+  assert.deepEqual(await f.result, LOGIN);
+});
+test("login validation preserves password, trims account, and rejects invalid bounds and fields", () => {
+  assert.deepEqual(validateLoginCredentials({ ...LOGIN, account: " synthetic@example.invalid ", password: "  ", rememberPassword: false }), { ...LOGIN, password: "  ", rememberPassword: false });
+  assert.equal(validateLoginCredentials({ ...LOGIN, password: "x".repeat(MAX_PASSWORD_LENGTH) }).password.length, MAX_PASSWORD_LENGTH);
+  assert.equal(validateLoginCredentials({ ...LOGIN, account: "x".repeat(MAX_ACCOUNT_LENGTH) }).account.length, MAX_ACCOUNT_LENGTH);
+  for (const value of [null, [], {}, { ...LOGIN, extra: true }, { ...LOGIN, rememberPassword: 1 },
+    ...["", " ", "x".repeat(MAX_ACCOUNT_LENGTH + 1), "x\n", "x\0", "x\u0085", "x\ud800"].map(account => ({ ...LOGIN, account })),
+    ...["", "x".repeat(MAX_PASSWORD_LENGTH + 1), "x\r", "x\t", "x\u2028", "x\u2029", "x\ud800"].map(password => ({ ...LOGIN, password }))]) {
+    assert.throws(() => validateLoginCredentials(value), { code: "INVALID_LOGIN" });
+  }
+});
+test("malformed login output fails closed with sanitized errors", async () => {
+  for (const bytes of [Buffer.from("not JSON"), Buffer.from(JSON.stringify({ ...LOGIN, password: "bad\n" })), Buffer.from([0xc3]), Buffer.alloc(MAX_LOGIN_OUTPUT_BYTES + 1, 97)]) {
+    const f = fixture(promptLogin);
+    const rejected = assert.rejects(f.result, { code: "INVALID_LOGIN" });
+    f.child.stdout.write(bytes); await f.complete(); await rejected;
+  }
+});
+test("login cancellation, stderr and signal handling keep the same secure lifecycle", async () => {
+  for (const mode of ["cancel", "stderr", "signal", "nonzero", "missing-eof"]) {
+    const f = fixture(promptLogin);
+    const rejected = assert.rejects(f.result, { code: ["cancel", "signal"].includes(mode) ? "CANCELLED" : "PROMPT_UNAVAILABLE" });
+    f.child.stdout.write(Buffer.from(JSON.stringify(LOGIN)));
+    if (mode === "stderr") f.child.stderr.write(Buffer.from("synthetic diagnostic"));
+    if (mode === "signal") f.signals.emit("SIGINT");
+    if (mode === "missing-eof") f.child.emit("close", 0, null);
+    else await f.complete(mode === "cancel" ? 130 : mode === "nonzero" ? 1 : 0);
+    await rejected;
+    assert.equal(f.signals.listenerCount("SIGINT"), 0);
   }
 });

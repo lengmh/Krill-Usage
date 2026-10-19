@@ -332,7 +332,7 @@ test('DOM mount renders all plans, dates, theme variables, and no credential inp
     assert.equal(ui.doc.documentElement.dataset.theme, 'light');
     assert.equal(ui.doc.documentElement.style.getPropertyValue('--color-text-primary'), '#123456');
     assert.equal(ui.doc.querySelectorAll('input[type="password"],input[type="text"],textarea').length, 0);
-    assert.match(ui.doc.querySelector('.setup-command').textContent, /node dist\/credential-cli.cjs set/);
+    assert.match(ui.doc.querySelector('.setup-command').textContent, /node dist\/credential-cli.cjs login/);
     assert.equal(ui.calls[0].params.name, 'krill.read');
     assert.equal(ui.timers.size, 2);
   } finally { ui.close(); }

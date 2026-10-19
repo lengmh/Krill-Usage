@@ -13,6 +13,7 @@ const ACCOUNT = "krill_jwt";
 const REVISION_FILE = "credential-revision.json";
 const LOCK_FILE = "credential-write.lock";
 const MAX_CREDENTIAL_LENGTH = 16_384;
+const MAX_SESSION_LENGTH = 131_072;
 const READ_TIMEOUT_MS = 5_000;
 const STORAGE_MESSAGE = "Secure credential storage is unavailable, locked, or changing. Unlock your OS vault and retry the owner-only credential command. No plaintext fallback is used.";
 
@@ -26,7 +27,7 @@ async function read() {
     const { AsyncEntry } = require(process.argv[1]);
     const entry = new AsyncEntry(${JSON.stringify(SERVICE)}, ${JSON.stringify(ACCOUNT)}, { linux: { store: "secret-service" } });
     const value = await entry.getPassword();
-    if (value != null && (typeof value !== "string" || value.length > ${MAX_CREDENTIAL_LENGTH})) throw new Error();
+    if (value != null && (typeof value !== "string" || value.length > ${MAX_SESSION_LENGTH})) throw new Error();
     process.send({ ok: true, value: value ?? null }, () => process.exit(0));
   } catch {
     process.send({ ok: false }, () => process.exit(0));
@@ -53,6 +54,35 @@ function normalizeCredential(raw) {
     throw Object.assign(new Error("Enter one nonempty JWT in the secure credential window."), { code: "INVALID_JWT" });
   }
   return value;
+}
+
+function normalizeSession(session) {
+  const invalid = () => Object.assign(new Error("Invalid account credentials."), { code: "INVALID_CREDENTIALS" });
+  if (!session || typeof session !== "object" || Array.isArray(session)) throw invalid();
+  const result = { jwt: normalizeCredential(session.jwt) };
+  if (session.account !== undefined) {
+    if (typeof session.account !== "string" || !session.account.trim() || session.account.length > 320 ||
+        !session.account.isWellFormed() || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(session.account)) throw invalid();
+    result.account = session.account.trim();
+  }
+  if (session.password !== undefined) {
+    if (!result.account || typeof session.password !== "string" || !session.password ||
+        session.password.length > 4096 || !session.password.isWellFormed() ||
+        /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(session.password)) throw invalid();
+    result.password = session.password;
+  }
+  return result;
+}
+
+function decodeSession(value) {
+  if (typeof value !== "string" || value.length > MAX_SESSION_LENGTH) throw storageError();
+  if (value.trimStart().startsWith("{")) {
+    const record = JSON.parse(value);
+    if (record?.version !== 1 || record.type !== "krill-session" ||
+        Object.keys(record).some(key => !["version", "type", "jwt", "account", "password"].includes(key))) throw storageError();
+    return normalizeSession(record);
+  }
+  return { jwt: normalizeCredential(value) };
 }
 
 /**
@@ -113,11 +143,13 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     let fd;
     try {
       fd = fs.openSync(temporary, "wx", 0o600);
-      fs.writeFileSync(fd, JSON.stringify({ version: 1, revision: randomUUID(), phase }) + "\n");
+      const revision = randomUUID();
+      fs.writeFileSync(fd, JSON.stringify({ version: 1, revision, phase }) + "\n");
       fs.fsyncSync(fd);
       fs.closeSync(fd);
       fd = undefined;
       fs.renameSync(temporary, revisionPath);
+      return revision;
     } finally {
       if (fd !== undefined) fs.closeSync(fd);
       try { fs.unlinkSync(temporary); } catch {}
@@ -176,7 +208,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
       child.on("message", message => {
         if (operation.settled) return;
         if (received || message?.ok !== true ||
-            (message.value !== null && (typeof message.value !== "string" || message.value.length > MAX_CREDENTIAL_LENGTH))) {
+            (message.value !== null && (typeof message.value !== "string" || message.value.length > MAX_SESSION_LENGTH))) {
           fail(); return;
         }
         received = true;
@@ -209,30 +241,44 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     } catch { throw storageError(); }
   }
 
-  async function read() {
+  async function readSession() {
     try {
       const before = await readRevision();
       const value = Entry || entryFactory ? await getEntry().getPassword() : await readVault(before);
       if (before !== await readRevision()) throw storageError();
       if (value === null || value === undefined) return null;
-      return normalizeCredential(value);
+      return decodeSession(value);
     } catch { throw storageError(); }
   }
 
-  function mutate(value) {
+  async function read() { return (await readSession())?.jwt ?? null; }
+
+  function mutate(value, { expectedRevision } = {}) {
     const operation = writes.catch(() => {}).then(async () => {
-      let lock;
+      let lock, conflict;
       try {
         checkDirectory(true);
         // Fail closed rather than attempting unsafe stale-lock takeover. After a
         // hard crash, the owner can remove this nonsecret lock once no setup runs.
         lock = fs.openSync(lockPath, "wx", 0o600);
         fs.writeFileSync(lock, `${process.pid}\n`);
+        // Compare while holding the same lock as clear/account-switch writers.
+        // A stale login must not mutate the marker or resurrect old credentials.
+        if (expectedRevision !== undefined) {
+          const marker = readMarker();
+          if (marker.phase !== "ready" || marker.revision !== expectedRevision) {
+            conflict = Object.assign(new Error("Credentials changed. Please retry account setup."), { code: "CREDENTIAL_CHANGED" });
+            throw conflict;
+          }
+        }
         writeMarker("changing");
         if (value === null) await getEntry().deletePassword();
         else await getEntry().setPassword(value);
-        writeMarker("ready");
-      } catch { throw storageError(); }
+        return writeMarker("ready");
+      } catch (error) {
+        if (conflict && error === conflict) throw conflict;
+        throw storageError();
+      }
       finally {
         if (lock !== undefined) {
           try { fs.closeSync(lock); } catch {}
@@ -244,11 +290,19 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return operation;
   }
 
-  function replace(raw) {
+  function replace(raw, options) {
     let value;
     try { value = normalizeCredential(raw); }
     catch (error) { return Promise.reject(error); }
-    return mutate(value);
+    return mutate(value, options);
+  }
+
+  function replaceSession(session, options) {
+    try {
+      const value = JSON.stringify({ version: 1, type: "krill-session", ...normalizeSession(session) });
+      if (value.length > MAX_SESSION_LENGTH) throw storageError();
+      return mutate(value, options);
+    } catch (error) { return Promise.reject(error); }
   }
 
   function clear() { return mutate(null); }
@@ -310,7 +364,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     }
   }
 
-  return { read, replace, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
+  return { read, readSession, replace, replaceSession, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
 }
 
-module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH, READ_TIMEOUT_MS };
+module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH, MAX_SESSION_LENGTH, READ_TIMEOUT_MS };

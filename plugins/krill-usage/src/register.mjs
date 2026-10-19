@@ -4,9 +4,11 @@ import { z } from 'zod/v4';
 import { preferenceSchema } from './preferences.mjs';
 export const UI_URI = 'ui://krill-usage/dashboard-v1';
 export function createServer({service, preferences, html}) {
-  const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.4'});
+  const server = new McpServer({name:'krill-usage', title:'Krill Usage', version:'0.1.5'});
   const readonly = {readOnlyHint:true, destructiveHint:false, openWorldHint:false};
   const localRead = {...readonly, openWorldHint:false};
+  // Refresh may renew an expired login and update the local OS vault.
+  const refreshHints = {...readonly, readOnlyHint:false};
   const result = (view, page) => {
     const {revision, values} = preferences.readSnapshot();
     return {content:[], structuredContent:{...(page ? {page}:{}), view, preferences:values, preferencesRevision:revision}};
@@ -24,12 +26,12 @@ export function createServer({service, preferences, html}) {
     read:()=>preferences.read(), update:(set)=>preferences.update(set)
   });
   for (const [name,type,page,description] of [
-    ['krill.usage','global','usage','Open Krill Usage and query subscription quota from the configured local account.'],
-    ['krill.panel','thread','usage','Open Krill Usage beside this conversation.'],
+    ['krill.usage','global','usage','Open Krill Usage and query subscription quota; may renew an expired login using the password saved in the local OS vault.'],
+    ['krill.panel','thread','usage','Open Krill Usage beside this conversation; may renew an expired login using the password saved in the local OS vault.'],
     ['krill.settings','settings','settings','Open non-secret preferences and local credential setup instructions.']
-  ]) server.registerTool(name,{title:'Krill Usage',description,inputSchema:z.object({}).strict(),annotations:page==='settings'?localRead:readonly,_meta:ui(type)},
+  ]) server.registerTool(name,{title:'Krill Usage',description,inputSchema:z.object({}).strict(),annotations:page==='settings'?localRead:refreshHints,_meta:ui(type)},
     async()=>result(page==='settings'?await service.read():await service.refresh(),page));
-  server.registerTool('krill.refresh',{title:'刷新额度',inputSchema:z.object({}).strict(),annotations:readonly,
+  server.registerTool('krill.refresh',{title:'刷新额度',description:'Refresh quota; may renew an expired login and update the local OS vault when a password was saved.',inputSchema:z.object({}).strict(),annotations:refreshHints,
     _meta:{ui:{visibility:['app']}}},async()=>result(await service.refresh()));
   server.registerTool('krill.read',{title:'读取面板状态',inputSchema:z.object({}).strict(),annotations:localRead,
     _meta:{ui:{visibility:['app']}}},async()=>result(await service.read()));
