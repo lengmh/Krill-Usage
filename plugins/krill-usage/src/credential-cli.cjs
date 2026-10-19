@@ -86,8 +86,8 @@ async function runCredentialCli(args = process.argv.slice(2), { output = process
       try {
         jwt = await login(credentials.account, credentials.password);
         await fetchUsage(jwt);
-        await store.replaceSession({jwt, account:credentials.account,
-          ...(credentials.rememberPassword ? {password:credentials.password} : {})}, {expectedRevision});
+        await store.replaceSession({jwt,
+          ...(credentials.rememberPassword ? {account:credentials.account, password:credentials.password} : {})}, {expectedRevision});
       } finally { credentials = null; jwt = null; }
       output.write("Signed in. Credentials saved in your OS vault according to your choice. Previous account data has been invalidated.\n");
     } else if (args[0] === "set") {

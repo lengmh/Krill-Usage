@@ -253,7 +253,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
 
   async function read() { return (await readSession())?.jwt ?? null; }
 
-  function mutate(value, { expectedRevision } = {}) {
+  function mutate(value, { expectedRevision, isCurrent } = {}, migrate = false) {
     const operation = writes.catch(() => {}).then(async () => {
       let lock, conflict;
       try {
@@ -271,9 +271,31 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
             throw conflict;
           }
         }
-        writeMarker("changing");
+        if (migrate) {
+          // Re-read under the writer lock: a previously observed legacy account
+          // is not permission to overwrite a later remembered login or clear.
+          const raw = await getEntry().getPassword();
+          const marker = readMarker();
+          if (disposed || (isCurrent && !isCurrent()) || marker.phase !== "ready" || marker.revision !== expectedRevision) {
+            conflict = Object.assign(new Error("Credentials changed. Please retry account setup."), { code: "CREDENTIAL_CHANGED" });
+            throw conflict;
+          }
+          const session = raw == null ? null : decodeSession(raw);
+          if (!session?.account || session.password !== undefined) return expectedRevision;
+          value = JSON.stringify({ version: 1, type: "krill-session", jwt: session.jwt });
+        }
+        const changingRevision = writeMarker("changing");
         if (value === null) await getEntry().deletePassword();
         else await getEntry().setPassword(value);
+        if (migrate) {
+          // Never advertise clean storage after a partial or silently failed
+          // vault write. An interrupted migration leaves the marker fail-closed.
+          if (disposed || (isCurrent && !isCurrent())) throw storageError();
+          const saved = await getEntry().getPassword();
+          if (disposed || (isCurrent && !isCurrent())) throw storageError();
+          const marker = readMarker();
+          if (saved !== value || marker.phase !== "changing" || marker.revision !== changingRevision) throw storageError();
+        }
         return writeMarker("ready");
       } catch (error) {
         if (conflict && error === conflict) throw conflict;
@@ -299,10 +321,19 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
 
   function replaceSession(session, options) {
     try {
-      const value = JSON.stringify({ version: 1, type: "krill-session", ...normalizeSession(session) });
+      const normalized = normalizeSession(session);
+      // Validate supplied fields even when they are not retained. JWT-only
+      // persistence must physically contain neither an account nor a password.
+      if (normalized.password === undefined) delete normalized.account;
+      const value = JSON.stringify({ version: 1, type: "krill-session", ...normalized });
       if (value.length > MAX_SESSION_LENGTH) throw storageError();
       return mutate(value, options);
     } catch (error) { return Promise.reject(error); }
+  }
+
+  function migrateJwtOnly(options = {}) {
+    if (typeof options.expectedRevision !== "string") return Promise.reject(storageError());
+    return mutate(undefined, options, true);
   }
 
   function clear() { return mutate(null); }
@@ -364,7 +395,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     }
   }
 
-  return { read, readSession, replace, replaceSession, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
+  return { read, readSession, replace, replaceSession, migrateJwtOnly, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
 }
 
 module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH, MAX_SESSION_LENGTH, READ_TIMEOUT_MS };

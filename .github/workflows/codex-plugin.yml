@@ -7,8 +7,8 @@ on:
     paths: ['plugins/krill-usage/**', 'src/model.js', 'src/jwt.js', '.agents/plugins/marketplace.json', '.github/workflows/codex-plugin.yml']
   workflow_dispatch:
     inputs:
-      publish_v015:
-        description: Add Codex packages to the existing v0.1.5 release (no overwrite)
+      publish_v016:
+        description: Publish a new Codex-only v0.1.6 corrective release (no overwrite)
         type: boolean
         default: false
 permissions:
@@ -50,8 +50,8 @@ jobs:
             plugins/krill-usage/artifacts/*.sha256
           if-no-files-found: error
           retention-days: 14
-  publish-v015:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_v015 && github.ref == 'refs/heads/main'
+  publish-v016:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_v016 && github.ref == 'refs/heads/main'
     needs: verify-and-package
     runs-on: ubuntu-latest
     timeout-minutes: 10

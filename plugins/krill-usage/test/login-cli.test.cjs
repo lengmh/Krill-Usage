@@ -13,7 +13,7 @@ function fixture(rememberPassword=true){
 for(const remember of [true,false])test(`login stores atomic session with remember=${remember}`,async()=>{
  const f=fixture(remember);assert.equal(await runCredentialCli(['login'],f.options),0);
  assert.deepEqual(f.calls.slice(0,2),['revision','prompt']);
- assert.deepEqual(f.calls.at(-1),['save',{jwt:'synthetic-token',account:'fake@example.invalid',...(remember?{password:'synthetic-secret'}:{})},{expectedRevision:'revision-one'}]);
+ assert.deepEqual(f.calls.at(-1),['save',{jwt:'synthetic-token',...(remember?{account:'fake@example.invalid',password:'synthetic-secret'}:{})},{expectedRevision:'revision-one'}]);
  assert.equal(f.calls.at(-2)[0],'quota');assert.doesNotMatch(f.output(),/synthetic-secret|synthetic-token|fake@example/);
 });
 for(const stage of ['loginPrompt','login','fetchUsage'])test(`${stage} failure does not change vault or echo secrets`,async()=>{
