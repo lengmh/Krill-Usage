@@ -85,6 +85,17 @@ export class UsageService {
         ? await this.credentials.readSession()
         : { jwt: await this.credentials.read() };
       if (!owns() || !await current() || !owns()) return this.view();
+      if (session?.account && session.password === undefined && this.credentials.migrateJwtOnly) {
+        // Only refresh can clean legacy account-only records. Suppress own
+        // marker notifications exactly as for a remembered-session renewal.
+        operation.renewing = true;
+        try {
+          revision = await this.credentials.migrateJwtOnly({ expectedRevision: revision, isCurrent: owns });
+          if (!owns()) return this.view();
+          this.revision = revision;
+        } finally { operation.renewing = false; }
+        if (!owns() || !await current() || !owns()) return this.view();
+      }
       this.authenticated = Boolean(session?.jwt);
       if (!session?.jwt) { this.reset(); this.error = this.safeError({code:'NO_JWT'}); }
       else {

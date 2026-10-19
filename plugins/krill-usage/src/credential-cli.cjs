@@ -9,9 +9,9 @@ const RECOVER_COMMAND = "node dist/credential-cli.cjs recover --confirm-stopped"
 const MANUAL_RECOVER_COMMAND = "node dist/credential-cli.cjs recover --manual --confirm-stopped";
 const STOPPED_WRITERS = "Stop all other Krill credential set, clear, and recover processes and related Krill MCP services. Keep them stopped until the recovery command finishes.";
 const CLEAR_ACKNOWLEDGMENT = `To remove the saved JWT from your OS vault and invalidate previous account data, run ${CLEAR_COMMAND}. This does not revoke the server-side JWT or log out your browser.`;
-const RECOVERY_ACKNOWLEDGMENT = `${STOPPED_WRITERS} Then run ${RECOVER_COMMAND} to remove only a lock whose valid process ID is confirmed stopped.`;
-const MANUAL_PRECONDITIONS = `An empty or malformed lock does not prove its owner has exited. ${STOPPED_WRITERS} Only the credential-write.lock file can be removed.`;
-const MANUAL_ACKNOWLEDGMENT = `${MANUAL_PRECONDITIONS} Then run ${MANUAL_RECOVER_COMMAND} to allow removal of that unknown-owner lock.`;
+const RECOVERY_ACKNOWLEDGMENT = `${STOPPED_WRITERS} Then run ${RECOVER_COMMAND} to remove only a lock whose recorded processes are all confirmed stopped.`;
+const MANUAL_PRECONDITIONS = `An empty or malformed legacy lock does not prove its owner has exited. Tracked migration locks with invalid ownership records cannot be manually recovered. ${STOPPED_WRITERS} Only the credential-write.lock file can be removed.`;
+const MANUAL_ACKNOWLEDGMENT = `${MANUAL_PRECONDITIONS} Then run ${MANUAL_RECOVER_COMMAND} to allow removal of that legacy unknown-owner lock.`;
 const HELP = `Krill Usage: owner-only credential setup
 
   node dist/credential-cli.cjs login                       Sign in in the Windows secure window
@@ -20,9 +20,10 @@ const HELP = `Krill Usage: owner-only credential setup
     Remove all saved login credentials from your OS vault and invalidate previous account data.
     This does not revoke the server-side JWT or log out your browser.
   ${RECOVER_COMMAND}
-    Remove only a lock whose valid process ID is confirmed stopped.
+    Remove only a lock whose recorded processes are all confirmed stopped.
   ${MANUAL_RECOVER_COMMAND}
-    Also allow removal of an empty or malformed lock whose owner is unknown.
+    Also allow removal of an empty or malformed legacy lock whose owner is unknown.
+    Invalid tracked migration locks are refused in both modes.
 
 Before either recovery command: ${STOPPED_WRITERS}
 Run these commands yourself locally. The flags acknowledge these consequences and
@@ -48,7 +49,7 @@ const SAFE_MESSAGES = {
   SECRET_STORAGE: "Secure credential storage is unavailable, locked, or changing. Unlock your OS vault and retry. After interrupted setup, close other credential commands and run recover --confirm-stopped, then set or clear --confirm-clear. No plaintext fallback is used.",
   CANCELLED: "Cancelled. Your saved credential was not changed.",
   RECOVERY_MANUAL_REQUIRED: "The lock has no valid process ID, so its owner is unknown. Stop all other credential commands and related Krill MCP services, then run recover --manual --confirm-stopped yourself while keeping them stopped until the recovery command finishes.",
-  RECOVERY_LIVE_LOCK: "The lock's process is running or cannot be verified as stopped. Close the related processes before trying again. Manual recovery cannot override this check.",
+  RECOVERY_LIVE_LOCK: "A recorded lock process is running or cannot be verified as stopped. Close the related processes before trying again. Manual recovery cannot override this check.",
   RECOVERY_FAILED: "Lock recovery was refused because the state directory or lock is unsafe, inaccessible, or changed during the check. Keep related processes stopped and inspect the state directory's ownership, permissions, and lock file type, size, and links before retrying. No vault credential was read or changed."
 };
 
@@ -86,8 +87,8 @@ async function runCredentialCli(args = process.argv.slice(2), { output = process
       try {
         jwt = await login(credentials.account, credentials.password);
         await fetchUsage(jwt);
-        await store.replaceSession({jwt, account:credentials.account,
-          ...(credentials.rememberPassword ? {password:credentials.password} : {})}, {expectedRevision});
+        await store.replaceSession({jwt,
+          ...(credentials.rememberPassword ? {account:credentials.account, password:credentials.password} : {})}, {expectedRevision});
       } finally { credentials = null; jwt = null; }
       output.write("Signed in. Credentials saved in your OS vault according to your choice. Previous account data has been invalidated.\n");
     } else if (args[0] === "set") {

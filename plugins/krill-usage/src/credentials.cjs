@@ -36,6 +36,24 @@ async function read() {
 void read();
 `;
 
+// Migration writes are new background vault operations. Keep synchronous native
+// construction/writes out of the MCP process, and never unlock until this child
+// has exited: a timed-out writer must not complete after an owner clear/switch.
+const MIGRATION_WRITE_SCRIPT = `
+process.once("disconnect", () => process.exit(0));
+process.once("message", async value => {
+  try {
+    if (typeof value !== "string" || value.length > ${MAX_SESSION_LENGTH}) throw new Error();
+    const { Entry } = require(process.argv[1]);
+    const entry = new Entry(${JSON.stringify(SERVICE)}, ${JSON.stringify(ACCOUNT)}, { linux: { store: "secret-service" } });
+    await entry.setPassword(value);
+    process.send({ ok: true }, () => process.exit(0));
+  } catch {
+    process.send({ ok: false }, () => process.exit(0));
+  }
+});
+`;
+
 function storageError() {
   return Object.assign(new Error(STORAGE_MESSAGE), { code: "SECRET_STORAGE" });
 }
@@ -96,6 +114,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
   let entry;
   let writes = Promise.resolve();
   let activeRead;
+  let activeWrite;
   let disposed = false;
 
   function checkPrivate(stat, isDirectory) {
@@ -228,9 +247,65 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return operation.promise;
   }
 
+  function writeMigrationVault(value, lock) {
+    if (disposed || activeWrite) return Promise.reject(storageError());
+    return new Promise((resolve, reject) => {
+      let child, timer, received = false, failed = false, settled = false;
+      const operation = { cancel: null };
+      activeWrite = operation;
+      const fail = () => {
+        if (settled) return;
+        failed = true;
+        try { child?.kill("SIGKILL"); } catch {}
+        // The close event, not a timer or IPC acknowledgement, releases the
+        // writer lock. A native task may still be running until process death.
+      };
+      operation.cancel = fail;
+      timer = setTimeout(fail, READ_TIMEOUT_MS);
+      try {
+        child = spawn(process.execPath, ["-e", MIGRATION_WRITE_SCRIPT, require.resolve("@napi-rs/keyring")], {
+          shell: false, windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"]
+        });
+        child.on("error", fail);
+        child.on("message", message => {
+          if (settled || failed) return;
+          if (received || message?.ok !== true) { fail(); return; }
+          received = true;
+        });
+        child.once("close", (code, signal) => {
+          settled = true;
+          clearTimeout(timer);
+          if (activeWrite === operation) activeWrite = null;
+          if (failed || code !== 0 || signal || !received) reject(storageError());
+          else resolve();
+        });
+        // The child cannot enter native code before this durable registration.
+        // A dead parent alone is not proof that its native writer has stopped.
+        if (!Number.isSafeInteger(child.pid) || child.pid <= 0) throw storageError();
+        const owners = Buffer.from(`!2 ${process.pid} ${child.pid}\n`);
+        if (fs.writeSync(lock, owners, 0, owners.length, 0) !== owners.length) throw storageError();
+        fs.ftruncateSync(lock, owners.length);
+        fs.fsyncSync(lock);
+        const verified = Buffer.alloc(owners.length + 1);
+        if (fs.readSync(lock, verified, 0, verified.length, 0) !== owners.length ||
+            !verified.subarray(0, owners.length).equals(owners)) throw storageError();
+        child.send(value, error => { if (error) fail(); });
+      } catch {
+        if (child) fail();
+        else {
+          settled = true;
+          clearTimeout(timer);
+          activeWrite = null;
+          reject(storageError());
+        }
+      }
+    });
+  }
+
   function dispose() {
     disposed = true;
     activeRead?.cancel();
+    activeWrite?.cancel();
   }
 
   async function readRevision() {
@@ -253,15 +328,18 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
 
   async function read() { return (await readSession())?.jwt ?? null; }
 
-  function mutate(value, { expectedRevision } = {}) {
+  function mutate(value, { expectedRevision, isCurrent } = {}, migrate = false) {
     const operation = writes.catch(() => {}).then(async () => {
       let lock, conflict;
       try {
         checkDirectory(true);
         // Fail closed rather than attempting unsafe stale-lock takeover. After a
         // hard crash, the owner can remove this nonsecret lock once no setup runs.
-        lock = fs.openSync(lockPath, "wx", 0o600);
-        fs.writeFileSync(lock, `${process.pid}\n`);
+        lock = fs.openSync(lockPath, migrate ? "wx+" : "wx", 0o600);
+        // Tagged from creation: partial helper metadata can never be mistaken
+        // for a legacy parent-only lock or manually recoverable unknown owner.
+        fs.writeFileSync(lock, migrate ? `!2 ${process.pid} -\n` : `${process.pid}\n`);
+        if (migrate) fs.fsyncSync(lock);
         // Compare while holding the same lock as clear/account-switch writers.
         // A stale login must not mutate the marker or resurrect old credentials.
         if (expectedRevision !== undefined) {
@@ -271,9 +349,32 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
             throw conflict;
           }
         }
-        writeMarker("changing");
+        if (migrate) {
+          // Re-read under the writer lock: a previously observed legacy account
+          // is not permission to overwrite a later remembered login or clear.
+          const raw = Entry || entryFactory ? await getEntry().getPassword() : await readVault(expectedRevision);
+          const marker = readMarker();
+          if (disposed || (isCurrent && !isCurrent()) || marker.phase !== "ready" || marker.revision !== expectedRevision) {
+            conflict = Object.assign(new Error("Credentials changed. Please retry account setup."), { code: "CREDENTIAL_CHANGED" });
+            throw conflict;
+          }
+          const session = raw == null ? null : decodeSession(raw);
+          if (!session?.account || session.password !== undefined) return expectedRevision;
+          value = JSON.stringify({ version: 1, type: "krill-session", jwt: session.jwt });
+        }
+        const changingRevision = writeMarker("changing");
         if (value === null) await getEntry().deletePassword();
+        else if (migrate && !Entry && !entryFactory) await writeMigrationVault(value, lock);
         else await getEntry().setPassword(value);
+        if (migrate) {
+          // Never advertise clean storage after a partial or silently failed
+          // vault write. An interrupted migration leaves the marker fail-closed.
+          if (disposed || (isCurrent && !isCurrent())) throw storageError();
+          const saved = Entry || entryFactory ? await getEntry().getPassword() : await readVault(changingRevision);
+          if (disposed || (isCurrent && !isCurrent())) throw storageError();
+          const marker = readMarker();
+          if (saved !== value || marker.phase !== "changing" || marker.revision !== changingRevision) throw storageError();
+        }
         return writeMarker("ready");
       } catch (error) {
         if (conflict && error === conflict) throw conflict;
@@ -299,10 +400,19 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
 
   function replaceSession(session, options) {
     try {
-      const value = JSON.stringify({ version: 1, type: "krill-session", ...normalizeSession(session) });
+      const normalized = normalizeSession(session);
+      // Validate supplied fields even when they are not retained. JWT-only
+      // persistence must physically contain neither an account nor a password.
+      if (normalized.password === undefined) delete normalized.account;
+      const value = JSON.stringify({ version: 1, type: "krill-session", ...normalized });
       if (value.length > MAX_SESSION_LENGTH) throw storageError();
       return mutate(value, options);
     } catch (error) { return Promise.reject(error); }
+  }
+
+  function migrateJwtOnly(options = {}) {
+    if (typeof options.expectedRevision !== "string") return Promise.reject(storageError());
+    return mutate(undefined, options, true);
   }
 
   function clear() { return mutate(null); }
@@ -333,21 +443,34 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
       try { stat = fs.lstatSync(lockPath); }
       catch (error) { if (error?.code === "ENOENT") return false; throw error; }
       checkPrivate(stat, false);
-      if (stat.size > 32 || stat.nlink !== 1) throw refused();
+      if (stat.size > 96 || stat.nlink !== 1) throw refused();
       fd = fs.openSync(lockPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
       const opened = fs.fstatSync(fd);
       checkPrivate(opened, false);
       if (!unchanged(stat, opened)) throw refused();
-      const contents = Buffer.alloc(33);
+      const contents = Buffer.alloc(97);
       const bytes = fs.readSync(fd, contents, 0, contents.length, 0);
       if (bytes !== stat.size || !unchanged(stat, fs.fstatSync(fd))) throw refused();
-      const pidText = contents.toString("utf8", 0, bytes).trim();
-      const pid = Number(pidText);
-      const validPid = /^[1-9][0-9]*$/u.test(pidText) && Number.isSafeInteger(pid);
-      if (validPid) {
+      const text = contents.toString("utf8", 0, bytes);
+      let owners;
+      if (text.startsWith("!")) {
+        const record = /^!2 ([1-9][0-9]*) (-|[1-9][0-9]*)\n$/u.exec(text);
+        if (!record) throw refused();
+        owners = record[2] === "-" ? [Number(record[1])] : [Number(record[1]), Number(record[2])];
+        if (owners.some(pid => !Number.isSafeInteger(pid))) throw refused();
+      } else {
+        // Compatibility with owner-command locks from previous releases. Only
+        // this old bounded format permits confirmed unknown-owner recovery.
+        if (bytes > 32) throw refused();
+        const pidText = text.trim(), pid = Number(pidText);
+        if (/^[1-9][0-9]*$/u.test(pidText) && Number.isSafeInteger(pid)) owners = [pid];
+        else if (manual !== true) throw refused("RECOVERY_MANUAL_REQUIRED");
+        else owners = [];
+      }
+      for (const pid of owners) {
         try { process.kill(pid, 0); throw refused("RECOVERY_LIVE_LOCK"); }
         catch (error) { if (error?.code !== "ESRCH") throw refused("RECOVERY_LIVE_LOCK"); }
-      } else if (manual !== true) throw refused("RECOVERY_MANUAL_REQUIRED");
+      }
       fs.closeSync(fd);
       fd = undefined;
       const current = fs.lstatSync(lockPath);
@@ -364,7 +487,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     }
   }
 
-  return { read, readSession, replace, replaceSession, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
+  return { read, readSession, replace, replaceSession, migrateJwtOnly, clear, readRevision, onDidChange, revision: readRevision, onChange: onDidChange, recoverInterruptedWrite, dispose };
 }
 
 module.exports = { createCredentialStore, defaultStateDir, normalizeCredential, storageError, SERVICE, ACCOUNT, REVISION_FILE, LOCK_FILE, MAX_CREDENTIAL_LENGTH, MAX_SESSION_LENGTH, READ_TIMEOUT_MS };

@@ -71,7 +71,7 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；失败后在当前扩展会话中暂停自动登录，需主动重新登录；重载扩展后可再次尝试。
 4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
-本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 与 Codex 插件均为 v0.1.5；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
+本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 为 v0.1.5，Codex 为 v0.1.6；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
 
 ### 命令
 
@@ -111,15 +111,15 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 
 ## Codex 插件
 
-Codex 插件版本为 `0.1.5`。面板显示全部套餐、账户余额、额度重置时间和套餐到期时间；点击刷新直接调用本地服务。面板可见时按设置查询，隐藏或关闭后停止界面定时查询，不提供常驻状态栏或无限期后台轮询。
+Codex 插件版本为 `0.1.6`。面板显示全部套餐、账户余额、额度重置时间和套餐到期时间；点击刷新直接调用本地服务。面板可见时按设置查询，隐藏或关闭后停止界面定时查询，不提供常驻状态栏或无限期后台轮询。
 
 ### 下载与安装
 
-从本仓库的 [v0.1.5 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.5) 下载与目标系统和 CPU 架构匹配的平台包，以及 [SHA256SUMS-codex-0.1.5](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/SHA256SUMS-codex-0.1.5) 校验文件：
+从本仓库的 [v0.1.6 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.6) 下载与目标系统和 CPU 架构匹配的平台包，以及 [SHA256SUMS-codex-0.1.6](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/SHA256SUMS-codex-0.1.6) 校验文件：
 
-- Windows x64：[krill-usage-codex-0.1.5-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-win32-x64.tar.gz)
-- macOS Apple Silicon：[krill-usage-codex-0.1.5-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-darwin-arm64.tar.gz)
-- Linux x64：[krill-usage-codex-0.1.5-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-linux-x64.tar.gz)
+- Windows x64：[krill-usage-codex-0.1.6-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-win32-x64.tar.gz)
+- macOS Apple Silicon：[krill-usage-codex-0.1.6-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-darwin-arm64.tar.gz)
+- Linux x64：[krill-usage-codex-0.1.6-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-linux-x64.tar.gz)
 
 平台包包含对应平台的原生凭据库模块，不能跨平台复制使用。macOS/Linux 包不提供新 JWT 输入方式；没有已存凭据时，无法完成账户设置。其他平台或架构可参考[源码构建说明](plugins/krill-usage/README.md#从源码构建并安装)，构建成功不等同于宿主验收通过。
 
@@ -128,14 +128,14 @@ Codex 插件版本为 `0.1.5`。面板显示全部套餐、账户余额、额度
 1. 在下载目录校验平台包。Windows PowerShell 示例：
 
    ```powershell
-   Get-FileHash .\krill-usage-codex-0.1.5-win32-x64.tar.gz -Algorithm SHA256
+   Get-FileHash .\krill-usage-codex-0.1.6-win32-x64.tar.gz -Algorithm SHA256
    ```
 
-   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.5` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
+   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.6` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
 2. 校验一致后解压。Windows 示例：
 
    ```powershell
-   tar -xzf krill-usage-codex-0.1.5-win32-x64.tar.gz
+   tar -xzf krill-usage-codex-0.1.6-win32-x64.tar.gz
    ```
 
    其他平台将文件名替换为下载的对应平台包。解压后的 `krill-usage-codex` 根目录包含 `.agents/plugins/marketplace.json` 和 `plugins/krill-usage`。
@@ -153,9 +153,10 @@ Codex 插件版本为 `0.1.5`。面板显示全部套餐、账户余额、额度
 
 ### 发布文件与源码对应关系
 
-`v0.1.5` Release 保留原有 VS Code VSIX 和标签，并补充 Codex 平台包。原有标签仍指向 `c744675`；GitHub 自动生成的「Source code (zip)」和「Source code (tar.gz)」对应原有 VS Code 源码，不包含本次 Codex 0.1.5 登录更新。
+`v0.1.6` 是 Codex 专用修复版本，修正未勾选「记住密码」仍保留邮箱的问题，并在升级后刷新时清理旧版残留邮箱。标签、平台包和单独的 [Codex 源码包](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-source.zip) 对应同一发布提交；详情见 `CODEX-RELEASE-0.1.6.json` 和 `SHA256SUMS-codex-0.1.6`。
 
-构建或审阅 Codex 平台包时，应使用同一 Release 中单独提供的 [krill-usage-codex-0.1.5-source.zip](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-codex-0.1.5-source.zip)。该源码包包含发布提交的完整仓库，准确提交记录在发布说明和 `CODEX-RELEASE-0.1.5.json` 中；它与本次 Codex 平台包配套，不替代原有 VS Code 源码。`SHA256SUMS-codex-0.1.5` 汇总 Codex 发布文件的校验值，原有源码 ZIP 和 `SHA256SUMS` 保持原样。
+VS Code 仍为 `0.1.5`，已有 `v0.1.5` 标签及全部发布文件不变。
+
 
 ## 开发与验证
 

@@ -1,23 +1,23 @@
-# Codex 0.1.5 verification
+# Codex 0.1.6 verification
 
-Date: 2026-10-19. All account data and API responses used in development tests are synthetic. No real credentials were requested, accessed, transmitted or stored.
+Date: 2026-10-19. All account data and API responses in tests are synthetic; no real credentials were requested, accessed, transmitted or stored.
 
-## Local checks
+## Corrective scope
 
-- Plugin syntax, bundled build, complete Node test suite and Linux x64 packaging.
-- Root VS Code suite: 76 tests passed; production VS Code code is unchanged.
-- Independent security review reproduced and fixed an asynchronous ownership race. Every revision-check await now rechecks operation ownership before publishing data or continuing recovery; seven same-turn race regressions cover the relevant branches.
-- Atomic single-record vault persistence; existing JWT compatibility; remember-disabled replacement; JWT-only replacement; clear; failed vault writes; conditional revision check under the existing writer lock; stale login after clear/switch; simultaneous same-account renewal followed by refresh.
-- Fixed-endpoint login POST and subscription GET, size/deadline limits, redirects and extra authentication rejected, sanitized API/CLI errors, no secrets in MCP output or ordinary state files.
-- Native prompt adapter validates structured account/password output. Windows harness includes production login save/cancel, unchecked remembering, bounds/control characters, paste handling and parent-termination races.
-- MCP refresh-capable tools advertise possible writes because expiry recovery can update the vault; pure reads retain read-only annotations.
+Codex 0.1.5's unchecked Remember password option did not save the password, but did retain the account email in the encrypted OS vault. This contradicted the native window's JWT-only promise. A second automatic review, triggered by marking the original draft ready, reported the issue after the first clean review and publication. Version 0.1.6 removes both fields in new JWT-only writes and physically cleans old account-only vault records during quota refresh.
 
-## Verification limits
+## Checks
 
-The Windows WPF test suite cannot execute on the Linux development host; it must pass in Windows CI. Platform builds and tests on GitHub Actions are required before release. Synthetic injected keyrings are not real OS-vault certification. Real Krill login and target Codex desktop acceptance are not verified by these tests. Account/password entry remains Windows-only, matching the existing native credential UI scope.
+- CLI regression asserts an unchecked login passes only JWT to persistence; store-level validation also ensures new no-password records physically omit the account.
+- Migration tests inspect the actual injected vault string, preserve JWT, verify physical read-back, and confirm idempotence and no writes on pure service.read().
+- Existing lock/revision checks protect concurrent clear, switch and remembered-account writes; ownership guards protect disposal, marker callbacks and same-turn asynchronous completion races.
+- Partial, ignored and failed vault writes, read-back errors, and failure to write the final ready marker fail closed. A post-changing failure requires owner set/clear recovery; unlock alone does not complete the interrupted mutation.
+- Automatic review identified synchronous native calls in the new migration path before publication. Both migration reads now use the bounded isolated read helper, and the migration-only write uses a disposable IPC child. The parent retains its write lock until the writer child exits on success, timeout or cancellation. Independent review additionally reproduced an orphan-writer race after hard parent termination. Before any write instruction is sent, the lock records both parent and child ownership; recovery requires both processes to have stopped. Production-path synthetic tests cover blocked constructors, reads and writes, hard parent death, recovery refusal while the orphan writer is alive, late results, child diagnostics, lock lifetime and nonsecret transport.
+- Full plugin syntax, bundled build, Node test suite and platform packaging. Existing login/recovery, native-window harness, MCP protocol and nonsecret settings tests remain included.
+- Synthetic release script tests verify exact source/version provenance, six-file roundtrip, unchanged previous-release metadata, and refusal of existing target tags or incorrect bundle commits before publication. These run on Linux/macOS; publication itself runs on Linux.
+- The dependency audit warning for [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) concerns the SDK OAuth client over HTTP. The advisory explicitly excludes MCP servers and stdio clients; this plugin uses `StdioServerTransport` and does not invoke the affected OAuth-client path. Dependencies were not changed in this bounded fix.
+- Independent review and exact-head automatic review are required before merge; all automatically triggered review runs must settle before release.
 
-Concurrent renewal intentionally invalidates a losing service's cached result when another process changes the credential revision. Its next refresh reads the winner's JWT without re-posting the password; clear/account-switch safety takes priority over retaining old cached quota.
+## Limits
 
-## Release provenance
-
-Codex 0.1.5 uses separately named platform archives, source ZIP, SHA256SUMS-codex-0.1.5 and CODEX-RELEASE-0.1.5.json on the existing v0.1.5 release. The tag remains c74467518c35eaacba1ac5d7c588af1e97fac22d and existing VS Code assets must not be replaced. The Codex manifest and BUILD-INFO.json identify the later exact source commit. The release workflow verifies downloaded bytes after upload.
+Windows WPF controls require Windows CI. Injected keyrings do not certify real OS-vault behavior; real Krill login and target Codex desktop acceptance still require the user's computer. Windows-only account/password entry scope is unchanged. This is a Codex-only release: VS Code remains 0.1.5 and all existing 0.1.5 assets/tag remain unchanged.

@@ -31,7 +31,8 @@ test('legacy JWT migration, nonremembered login, raw JWT replacement and clear e
   assert.deepEqual(await f.store.readSession(),{jwt:'synthetic-legacy'});
   await f.store.replaceSession(session);
   await f.store.replaceSession({jwt:'synthetic-new',account:session.account});
-  assert.deepEqual(await f.store.readSession(),{jwt:'synthetic-new',account:session.account});
+  assert.deepEqual(await f.store.readSession(),{jwt:'synthetic-new'});
+  assert.ok(!f.value().includes(session.account));
   assert.ok(!f.value().includes(session.password));
   await f.store.replaceSession(session); await f.store.replace('synthetic-raw');
   assert.deepEqual(await f.store.readSession(),{jwt:'synthetic-raw'});
