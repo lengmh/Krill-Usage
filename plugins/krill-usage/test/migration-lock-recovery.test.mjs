@@ -49,15 +49,36 @@ test('hard parent death cannot unlock a surviving native writer or allow clear t
   assert.equal(fs.readFileSync(path.join(stateDir,LOCK_FILE),'utf8'),`!2 ${parent.pid} ${writerPid}\n`);
   const closed=new Promise(resolve=>parent.once('close',resolve));parent.kill('SIGKILL');await closed;
   const store=createCredentialStore({stateDir,entryFactory:()=>({getPassword:()=>fs.readFileSync(vault,'utf8'),setPassword:v=>fs.writeFileSync(vault,v),deletePassword:()=>fs.rmSync(vault,{force:true})})});
-  for(const manual of [false,true])assert.throws(()=>store.recoverInterruptedWrite({manual}),{code:'RECOVERY_LIVE_LOCK'});
-  await assert.rejects(store.clear(),{code:'SECRET_STORAGE'});
+  const writerStopped=()=>{try{process.kill(writerPid,0);return false;}catch(error){if(error.code==='ESRCH')return true;throw error;}};
+  let recovered=false;
+  for(const manual of [false,true]){
+    const stoppedBefore=writerStopped();
+    let error;try{recovered=store.recoverInterruptedWrite({manual});}catch(failure){error=failure;}
+    if(recovered){
+      // Some platforms terminate descendants with their parent. Independently
+      // prove writer death rather than requiring an orphan to survive everywhere.
+      assert.equal(writerStopped(),true,'recovery must never unlock a surviving native writer');
+      break;
+    }
+    assert.equal(stoppedBefore,false,'a proven-dead writer should allow recovery');
+    assert.equal(error?.code,'RECOVERY_LIVE_LOCK');
+  }
   assert.equal(fs.readFileSync(vault,'utf8'),JSON.stringify(legacy));
-  fs.writeFileSync(release,'release');await until(()=>fs.existsSync(done));
-  assert.deepEqual(JSON.parse(fs.readFileSync(vault,'utf8')),{version:1,type:'krill-session',jwt:legacy.jwt});
-  // A zombie/reused PID remains conservatively locked. Once the OS proves exit,
-  // recovery and clear may proceed, never before the orphan native write ends.
-  let dead=false;try{process.kill(writerPid,0);}catch(e){dead=e.code==='ESRCH';}
-  if(dead){assert.equal(store.recoverInterruptedWrite(),true);await store.clear();assert.equal(fs.existsSync(vault),false);}
-  else assert.throws(()=>store.recoverInterruptedWrite({manual:true}),{code:'RECOVERY_LIVE_LOCK'});
+  if(recovered){
+    await store.clear();assert.equal(fs.existsSync(vault),false);
+    fs.writeFileSync(release,'release');await delay(100);
+    assert.equal(fs.existsSync(done),false);assert.equal(fs.existsSync(vault),false,'terminated child cannot resurrect owner-cleared credentials');
+  }else{
+    await assert.rejects(store.clear(),{code:'SECRET_STORAGE'});
+    fs.writeFileSync(release,'release');await until(()=>fs.existsSync(done)||writerStopped());
+    if(fs.existsSync(done))assert.deepEqual(JSON.parse(fs.readFileSync(vault,'utf8')),{version:1,type:'krill-session',jwt:legacy.jwt});
+    else assert.equal(fs.readFileSync(vault,'utf8'),JSON.stringify(legacy));
+    // A zombie/reused PID remains conservatively locked. Recovery and clear are
+    // permitted only after the OS independently proves the writer has exited.
+    let finalRecovered=false,finalError;
+    try{finalRecovered=store.recoverInterruptedWrite({manual:true});}catch(error){finalError=error;}
+    if(finalRecovered){assert.equal(writerStopped(),true);await store.clear();assert.equal(fs.existsSync(vault),false);}
+    else assert.equal(finalError?.code,'RECOVERY_LIVE_LOCK');
+  }
   store.dispose();
 });
