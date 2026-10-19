@@ -324,6 +324,14 @@ class KrillUsageService {
         // SecretStorage offers no compare-and-swap; this narrows, not eliminates,
         // the cross-process read/write race.
         if (JSON.stringify(currentAuth) !== credentials.expectedRecord) {
+          const sameAccountRenewal = currentAuth.email === credentials.email &&
+            currentAuth.password === credentials.password &&
+            typeof currentAuth.jwt === "string" && currentAuth.jwt.length > 0 &&
+            currentAuth.jwt.length <= 16_384 && !/\s/.test(currentAuth.jwt) &&
+            currentAuth.jwt !== JSON.parse(credentials.expectedRecord).jwt;
+          // Another window already renewed this same account. Keep its token,
+          // but the quota verified by this completed request remains usable.
+          if (sameAccountRenewal) return;
           this.invalidateInFlight();
           this.snapshot = null;
           this.lastSuccessAt = 0;

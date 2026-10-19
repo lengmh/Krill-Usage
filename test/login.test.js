@@ -358,3 +358,60 @@ test("another window switching accounts during recovery keeps its new credential
   assert.equal(b.service.getView().snapshot, null);
   a.service.dispose(); b.service.dispose();
 });
+
+test("concurrent same-account recovery preserves the first committed JWT and both quota results", async () => {
+  let finishA, finishB;
+  const pendingA = new Promise(resolve => { finishA = resolve; });
+  const pendingB = new Promise(resolve => { finishB = resolve; });
+  const a = setup({ jwt: null, email: "a@example.test", password: "password-a", login: () => pendingA });
+  const b = setup({ login: () => pendingB });
+  b.service.context.secrets = a.service.context.secrets;
+  const recoveryA = a.service.refresh();
+  const recoveryB = b.service.refresh();
+  while (![a, b].every(x => x.calls.some(([op]) => op === "login"))) await Promise.resolve();
+  finishA("first-committed-token");
+  assert.deepEqual(await recoveryA, a.snapshot);
+  const committed = a.stored.get(AUTH_SECRET_KEY);
+  const storesBeforeB = a.calls.filter(([op]) => op === "store").length;
+  finishB("late-response-token");
+  assert.deepEqual(await recoveryB, b.snapshot);
+  assert.equal(a.stored.get(AUTH_SECRET_KEY), committed, "late recovery must not overwrite another window's token");
+  assert.equal(a.calls.filter(([op]) => op === "store").length, storesBeforeB);
+  assert.deepEqual(b.service.getView().snapshot, b.snapshot);
+  assert.equal(b.service.getView().authenticated, true);
+  assert.equal(b.service.getView().refreshing, false);
+  assert.equal(b.service.getView().error, null);
+  a.service.dispose(); b.service.dispose();
+});
+
+test("changed credentials or unusable JWT cannot bypass the cross-window recovery guard", async (t) => {
+  for (const replacement of [
+    { jwt: "other-token", email: "b@example.test", password: "password-a" },
+    { jwt: "other-token", email: "a@example.test", password: "changed-password" },
+    { jwt: "other-token" },
+    { jwt: null, email: "a@example.test", password: "password-a" },
+    { jwt: "", email: "a@example.test", password: "password-a" },
+    { jwt: "invalid token", email: "a@example.test", password: "password-a" }
+  ]) {
+    await t.test(JSON.stringify(replacement), async () => {
+      let resolve;
+      const pending = new Promise(r => { resolve = r; });
+      const x = setup({ jwt: "expired-token", email: "a@example.test", password: "password-a", login: () => pending,
+        fetch: async jwt => {
+          if (jwt === "expired-token") throw Object.assign(new Error("expired"), { code: "UNAUTHORIZED" });
+          return { creditBalance: "25", subscriptions: [] };
+        }
+      });
+      const recovery = x.service.refresh();
+      while (!x.calls.some(([op]) => op === "login")) await Promise.resolve();
+      const newerRecord = JSON.stringify({ version: 1, ...replacement });
+      x.stored.set(AUTH_SECRET_KEY, newerRecord);
+      resolve("late-token");
+      const currentRecord = x.stored.get(AUTH_SECRET_KEY);
+      assert.equal(await recovery, null);
+      assert.equal(x.stored.get(AUTH_SECRET_KEY), currentRecord);
+      assert.equal(x.service.getView().snapshot, null);
+      x.service.dispose();
+    });
+  }
+});
