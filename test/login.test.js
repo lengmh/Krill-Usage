@@ -325,3 +325,36 @@ test("disabling password memory wins over an in-progress account commit", async 
   assert.deepEqual(x.auth(), { version: 1, jwt: "new-jwt" });
   x.service.dispose();
 });
+
+test("another window clearing during automatic login cannot be undone by its late response", async () => {
+  let resolve;
+  const pending = new Promise(r => { resolve = r; });
+  const a = setup({ jwt: null, email: "a@example.test", password: "password-a" });
+  const b = setup({ login: () => pending });
+  b.service.context.secrets = a.service.context.secrets;
+  const recovering = b.service.refresh();
+  while (!b.calls.some(([op]) => op === "login")) await Promise.resolve();
+  await a.service.clearCredentials();
+  resolve("late-token-a");
+  assert.equal(await recovering, null);
+  assert.deepEqual(a.auth(), { version: 1, jwt: null });
+  assert.equal(b.service.getView().snapshot, null);
+  assert.equal(b.service.getView().authenticated, false);
+  a.service.dispose(); b.service.dispose();
+});
+
+test("another window switching accounts during recovery keeps its new credential record", async () => {
+  let resolve;
+  const pending = new Promise(r => { resolve = r; });
+  const a = setup({ jwt: null, email: "a@example.test", password: "password-a" });
+  const b = setup({ login: () => pending });
+  b.service.context.secrets = a.service.context.secrets;
+  const recovering = b.service.refresh();
+  while (!b.calls.some(([op]) => op === "login")) await Promise.resolve();
+  await a.service.setJwt("token-b");
+  resolve("late-token-a");
+  assert.equal(await recovering, null);
+  assert.deepEqual(a.auth(), { version: 1, jwt: "token-b" });
+  assert.equal(b.service.getView().snapshot, null);
+  a.service.dispose(); b.service.dispose();
+});

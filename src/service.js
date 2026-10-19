@@ -105,10 +105,11 @@ class KrillUsageService {
 
   async readLoginCredentials(generation = this.generation) {
     if (!this.rememberPassword()) return null;
-    const { email, password } = await this.readAuth();
+    const auth = await this.readAuth();
+    const { email, password } = auth;
     if (this.disposed || this.generation !== generation || !this.rememberPassword()) return null;
     return typeof email === "string" && email && typeof password === "string" && password
-      ? { email, password } : null;
+      ? { email, password, expectedRecord: JSON.stringify(auth) } : null;
   }
 
   async setJwt(rawJwt) {
@@ -316,7 +317,22 @@ class KrillUsageService {
       if (!isCurrent() || !this.rememberPassword()) return null;
       await this.queueSecretWrite(async () => {
         if (!isCurrent() || !this.rememberPassword()) return;
-        await this.writeAuth({ version: 1, jwt, ...credentials });
+        const currentAuth = await this.readAuth();
+        if (!isCurrent() || !this.rememberPassword()) return;
+        // Another VS Code window may have cleared/switched accounts during the
+        // network request. Never overwrite its newer identity with this retry.
+        // SecretStorage offers no compare-and-swap; this narrows, not eliminates,
+        // the cross-process read/write race.
+        if (JSON.stringify(currentAuth) !== credentials.expectedRecord) {
+          this.invalidateInFlight();
+          this.snapshot = null;
+          this.lastSuccessAt = 0;
+          this.error = null;
+          this._hasJwt = Boolean(currentAuth.jwt);
+          this.emit();
+          return;
+        }
+        await this.writeAuth({ version: 1, jwt, email: credentials.email, password: credentials.password });
       });
       if (!isCurrent()) return null;
       this._hasJwt = true;

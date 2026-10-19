@@ -68,7 +68,7 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 
 1. 执行 **Krill: Log In (Email/Password)**，在原生输入框输入邮箱与密码。
 2. 扩展通过 Krill 固定 HTTPS 登录接口取得 JWT，并验证额度接口后保存凭据。
-3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；失败后暂停自动登录，需主动重新登录。
+3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；失败后在当前扩展会话中暂停自动登录，需主动重新登录；重载扩展后可再次尝试。
 4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
 本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。密码登录仅适用于 VS Code v0.1.5，Codex 插件仍为 v0.1.4。
@@ -105,7 +105,7 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 - Cloudflare 验证：插件会报告验证错误，不自动完成或绕过验证。
 - 查询失败后可能保留上次成功结果，会明确标为旧数据；成功刷新后恢复正常显示。
 - 超过刷新间隔的数据会标为过期。时间显示每分钟更新一次，因此纯时间触发的标记最多有约 1 分钟显示延迟。
-- 多个 VS Code 窗口不会即时同步账号显示。切换或清除凭据后，请刷新或重载其他窗口。
+- 多窗口共享 SecretStorage，但没有跨窗口原子事务。自动恢复提交前会检查账号是否改变，丢弃网络等待期间被其他窗口清除或替换的凭据；仍存在极短的检查到写入竞态。切换或清除凭据前请关闭其他运行本扩展的窗口，操作后再打开，避免重叠写入。
 - 额度和计费以 Krill 服务端为准；接口或登录方式变化可能导致扩展失效。
 - `extensionKind: ["ui"]`：使用 Remote SSH、WSL 或 Dev Container 时优先在本地 UI Extension Host 运行。
 
