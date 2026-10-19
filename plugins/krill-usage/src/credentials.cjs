@@ -247,7 +247,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
     return operation.promise;
   }
 
-  function writeMigrationVault(value) {
+  function writeMigrationVault(value, lock) {
     if (disposed || activeWrite) return Promise.reject(storageError());
     return new Promise((resolve, reject) => {
       let child, timer, received = false, failed = false, settled = false;
@@ -279,6 +279,16 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
           if (failed || code !== 0 || signal || !received) reject(storageError());
           else resolve();
         });
+        // The child cannot enter native code before this durable registration.
+        // A dead parent alone is not proof that its native writer has stopped.
+        if (!Number.isSafeInteger(child.pid) || child.pid <= 0) throw storageError();
+        const owners = Buffer.from(`!2 ${process.pid} ${child.pid}\n`);
+        if (fs.writeSync(lock, owners, 0, owners.length, 0) !== owners.length) throw storageError();
+        fs.ftruncateSync(lock, owners.length);
+        fs.fsyncSync(lock);
+        const verified = Buffer.alloc(owners.length + 1);
+        if (fs.readSync(lock, verified, 0, verified.length, 0) !== owners.length ||
+            !verified.subarray(0, owners.length).equals(owners)) throw storageError();
         child.send(value, error => { if (error) fail(); });
       } catch {
         if (child) fail();
@@ -325,8 +335,11 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
         checkDirectory(true);
         // Fail closed rather than attempting unsafe stale-lock takeover. After a
         // hard crash, the owner can remove this nonsecret lock once no setup runs.
-        lock = fs.openSync(lockPath, "wx", 0o600);
-        fs.writeFileSync(lock, `${process.pid}\n`);
+        lock = fs.openSync(lockPath, migrate ? "wx+" : "wx", 0o600);
+        // Tagged from creation: partial helper metadata can never be mistaken
+        // for a legacy parent-only lock or manually recoverable unknown owner.
+        fs.writeFileSync(lock, migrate ? `!2 ${process.pid} -\n` : `${process.pid}\n`);
+        if (migrate) fs.fsyncSync(lock);
         // Compare while holding the same lock as clear/account-switch writers.
         // A stale login must not mutate the marker or resurrect old credentials.
         if (expectedRevision !== undefined) {
@@ -351,7 +364,7 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
         }
         const changingRevision = writeMarker("changing");
         if (value === null) await getEntry().deletePassword();
-        else if (migrate && !Entry && !entryFactory) await writeMigrationVault(value);
+        else if (migrate && !Entry && !entryFactory) await writeMigrationVault(value, lock);
         else await getEntry().setPassword(value);
         if (migrate) {
           // Never advertise clean storage after a partial or silently failed
@@ -430,21 +443,34 @@ function createCredentialStore({ Entry, entryFactory, stateDir = defaultStateDir
       try { stat = fs.lstatSync(lockPath); }
       catch (error) { if (error?.code === "ENOENT") return false; throw error; }
       checkPrivate(stat, false);
-      if (stat.size > 32 || stat.nlink !== 1) throw refused();
+      if (stat.size > 96 || stat.nlink !== 1) throw refused();
       fd = fs.openSync(lockPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
       const opened = fs.fstatSync(fd);
       checkPrivate(opened, false);
       if (!unchanged(stat, opened)) throw refused();
-      const contents = Buffer.alloc(33);
+      const contents = Buffer.alloc(97);
       const bytes = fs.readSync(fd, contents, 0, contents.length, 0);
       if (bytes !== stat.size || !unchanged(stat, fs.fstatSync(fd))) throw refused();
-      const pidText = contents.toString("utf8", 0, bytes).trim();
-      const pid = Number(pidText);
-      const validPid = /^[1-9][0-9]*$/u.test(pidText) && Number.isSafeInteger(pid);
-      if (validPid) {
+      const text = contents.toString("utf8", 0, bytes);
+      let owners;
+      if (text.startsWith("!")) {
+        const record = /^!2 ([1-9][0-9]*) (-|[1-9][0-9]*)\n$/u.exec(text);
+        if (!record) throw refused();
+        owners = record[2] === "-" ? [Number(record[1])] : [Number(record[1]), Number(record[2])];
+        if (owners.some(pid => !Number.isSafeInteger(pid))) throw refused();
+      } else {
+        // Compatibility with owner-command locks from previous releases. Only
+        // this old bounded format permits confirmed unknown-owner recovery.
+        if (bytes > 32) throw refused();
+        const pidText = text.trim(), pid = Number(pidText);
+        if (/^[1-9][0-9]*$/u.test(pidText) && Number.isSafeInteger(pid)) owners = [pid];
+        else if (manual !== true) throw refused("RECOVERY_MANUAL_REQUIRED");
+        else owners = [];
+      }
+      for (const pid of owners) {
         try { process.kill(pid, 0); throw refused("RECOVERY_LIVE_LOCK"); }
         catch (error) { if (error?.code !== "ESRCH") throw refused("RECOVERY_LIVE_LOCK"); }
-      } else if (manual !== true) throw refused("RECOVERY_MANUAL_REQUIRED");
+      }
       fs.closeSync(fd);
       fd = undefined;
       const current = fs.lstatSync(lockPath);

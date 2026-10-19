@@ -97,3 +97,27 @@ test('dispose kills a pending migration writer and waits for close before unlock
   await rejected;assert.ok(f.children.every(c=>c.closed));assert.equal(fs.existsSync(path.join(f.stateDir,LOCK_FILE)),false);
   assert.equal(f.control().written,false);assert.ok(!f.events().some(e=>e.event==='late-write'));
 });
+test('failed durable writer registration never sends the write instruction and waits for child exit',async t=>{
+  const f=setup(t,'success'),sync=fs.fsyncSync;let calls=0;
+  t.mock.method(fs,'fsyncSync',(...args)=>{if(++calls===3)throw Error('synthetic-private-registration');return sync(...args);});
+  await assert.rejects(f.store.migrateJwtOnly({expectedRevision:'absent'}),e=>e.code==='SECRET_STORAGE'&&!e.message.includes('synthetic-'));
+  assert.ok(f.children.every(c=>c.closed));assert.equal(f.events().some(e=>e.event==='write-start'||e.event==='write-construct'),false);
+  assert.equal(f.control().written,false);assert.equal(fs.existsSync(path.join(f.stateDir,LOCK_FILE)),false);
+});
+for(const failure of ['partial-registration','registration-readback'])test(`${failure} cannot authorize a child vault write`,async t=>{
+  const f=setup(t,'success');
+  if(failure==='partial-registration'){
+    const write=fs.writeSync;
+    t.mock.method(fs,'writeSync',function(fd,buffer,offset,length,position){
+      if(Buffer.isBuffer(buffer)&&/^!2 [0-9]+ [0-9]+\n$/u.test(buffer.toString()))return write.call(this,fd,buffer,offset,3,position);
+      return write.apply(this,arguments);
+    });
+  }else{
+    const read=fs.readSync;
+    t.mock.method(fs,'readSync',function(fd,buffer,...args){const bytes=read.call(this,fd,buffer,...args);if(buffer.toString().startsWith('!2 '))buffer[0]=32;return bytes;});
+  }
+  await assert.rejects(f.store.migrateJwtOnly({expectedRevision:'absent'}),{code:'SECRET_STORAGE'});
+  assert.ok(f.children.every(c=>c.closed));assert.equal(f.control().written,false);
+  assert.equal(f.events().some(e=>e.event==='write-start'||e.event==='write-construct'),false);
+  assert.equal(fs.existsSync(path.join(f.stateDir,LOCK_FILE)),false);
+});

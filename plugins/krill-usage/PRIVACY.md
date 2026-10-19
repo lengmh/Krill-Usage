@@ -38,7 +38,7 @@ Krill Usage 是独立维护的非官方工具，与 Krill 运营方无隶属或�
 
 ## 凭据锁手动恢复
 
-异常退出可能留下空的或 PID 格式无效的 `credential-write.lock`。普通 `recover --confirm-stopped` 不会删除这类归属未知的锁。`recover --manual --confirm-stopped` 仅供账户本人在本地使用，确认其他凭据写入进程及相关 Krill MCP 服务已停止，并保持停止直到命令结束。手动模式仍拒绝移除已知存活进程的锁；无法确认有效 PID 对应进程已退出时也会拒绝。
+异常退出可能留下空的或旧格式 PID 无效的 `credential-write.lock`。普通 `recover --confirm-stopped` 不会删除这类归属未知的锁。`recover --manual --confirm-stopped` 仅供账户本人在本地使用，确认其他凭据写入进程及相关 Krill MCP 服务已停止，并保持停止直到命令结束。迁移锁同时记录父进程和写入子进程；任何已记录进程仍存活或无法确认已退出时，两种模式都会拒绝删除。新版迁移锁的进程记录不完整或损坏时也会拒绝，手动模式不能绕过此检查。
 
 恢复只检查并移除固定的凭据锁，不初始化或访问系统凭据库，不读取或修改凭据修订标记、显示偏好或偏好设置锁，也不输出锁内容。文件检查与删除不是原子操作，安全性依赖上述停写条件。恢复后仍须执行 `set` 或 `clear --confirm-clear` 完成账户设置。具体步骤见 [README 的凭据写入锁恢复](README.md#凭据写入锁恢复)。
 
