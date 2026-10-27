@@ -321,7 +321,9 @@ class KrillUsageService {
       this.resetCooldown();
       this.emit();
       this.logEvent("storage", "external", "changed");
-      if (auth.jwt) void this.refresh("external", { silent: true });
+      // Secret changes invalidate cached account state, but must not initiate an
+      // unsolicited quota GET. The next timer, focus, or manual refresh reads
+      // the latest stored JWT. This also avoids extra requests during migration.
     } catch {
       if (!this.disposed) {
         this.error = safeFailure({ code: "SECRET_STORAGE", phase: "storage" });
