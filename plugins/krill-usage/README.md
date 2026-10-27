@@ -2,9 +2,9 @@
 
 非官方 Krill 额度面板。本地 Node.js stdio MCP 服务提供打包的 HTML/JavaScript 界面、侧栏入口、会话面板和设置入口。邮箱、密码或 JWT 由账户本人通过 Windows 原生窗口输入；仅使用操作系统凭据库保存登录凭据，不通过终端、聊天、MCP 参数或普通设置传入。
 
-Codex 插件版本为 `0.1.6`，作为独立的 Codex 修复版本发布。安装验收情况见[桌面宿主验收与复核](#桌面宿主验收与复核)。
+Codex 插件版本为 `0.1.7`，与 VS Code v0.1.7 一起发布。安装验收情况见[桌面宿主验收与复核](#桌面宿主验收与复核)。
 
-同仓库还提供 VS Code `0.1.5` 扩展，安装与状态栏设置见[仓库首页](https://github.com/lengmh/Krill-Usage#readme)。两个客户端分别保存凭据。
+同仓库还提供 VS Code `0.1.7` 扩展，安装与状态栏设置见[仓库首页](https://github.com/lengmh/Krill-Usage#readme)。两个客户端分别保存凭据。
 
 ## 0.1.6 隐私修正
 
@@ -39,25 +39,25 @@ Windows 运行条件参考 Microsoft 的 [.NET Framework 安装与系统版本�
 
 ## 从平台包安装
 
-从本仓库的 [v0.1.6 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.6) 下载目标系统与 CPU 架构对应的平台包，以及 [SHA256SUMS-codex-0.1.6](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/SHA256SUMS-codex-0.1.6) 校验文件：
+从本仓库的 [v0.1.7 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.7) 下载目标系统与 CPU 架构对应的平台包，以及 [SHA256SUMS-v0.1.7](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/SHA256SUMS-v0.1.7) 校验文件：
 
-- Windows x64：[krill-usage-codex-0.1.6-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-win32-x64.tar.gz)
-- macOS Apple Silicon：[krill-usage-codex-0.1.6-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-darwin-arm64.tar.gz)
-- Linux x64：[krill-usage-codex-0.1.6-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-linux-x64.tar.gz)
+- Windows x64：[krill-usage-codex-0.1.7-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-win32-x64.tar.gz)
+- macOS Apple Silicon：[krill-usage-codex-0.1.7-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-darwin-arm64.tar.gz)
+- Linux x64：[krill-usage-codex-0.1.7-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-linux-x64.tar.gz)
 
 平台包包含运行所需的 JavaScript 和对应平台的原生凭据库模块，无需安装 npm 依赖；仍需满足前述 Node.js、系统凭据库及 Windows 密码窗口运行条件。macOS/Linux 包仅支持使用已存凭据，不提供首次设置或替换 JWT 的回退方式。
 
 1. 在下载目录校验平台包。Windows PowerShell 示例：
 
    ```powershell
-   Get-FileHash .\krill-usage-codex-0.1.6-win32-x64.tar.gz -Algorithm SHA256
+   Get-FileHash .\krill-usage-codex-0.1.7-win32-x64.tar.gz -Algorithm SHA256
    ```
 
-   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.6` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
+   将输出的完整 SHA256 值与 `SHA256SUMS-v0.1.7` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
 2. 校验一致后解压。Windows 示例：
 
    ```powershell
-   tar -xzf krill-usage-codex-0.1.6-win32-x64.tar.gz
+   tar -xzf krill-usage-codex-0.1.7-win32-x64.tar.gz
    ```
 
    其他平台将文件名替换为下载的对应平台包。保留解压后的完整 `krill-usage-codex` 目录，其结构包括：
@@ -198,7 +198,7 @@ npm test
 npm run package
 ```
 
-`artifacts/krill-usage-codex-0.1.6-<platform>-<arch>.tar.gz` 包含本地 marketplace、服务器、界面、当前平台凭据库二进制和许可证；Windows 产物另含从本仓库源码编译的密码窗口程序。解压根目录为 `krill-usage-codex`，其中包含 `.agents/plugins/marketplace.json` 和完整的 `plugins/krill-usage` 插件目录，可直接按前述平台包流程注册。无需安装 npm 依赖，但仍需 Node.js 22+，Windows 密码窗口还需前述 .NET Framework。本地构建和 Actions 产物附带 `.tar.gz.sha256`；GitHub Release 使用汇总校验文件 `SHA256SUMS-codex-0.1.6`。
+`artifacts/krill-usage-codex-0.1.7-<platform>-<arch>.tar.gz` 包含本地 marketplace、服务器、界面、当前平台凭据库二进制和许可证；Windows 产物另含从本仓库源码编译的密码窗口程序。解压根目录为 `krill-usage-codex`，其中包含 `.agents/plugins/marketplace.json` 和完整的 `plugins/krill-usage` 插件目录，可直接按前述平台包流程注册。无需安装 npm 依赖，但仍需 Node.js 22+，Windows 密码窗口还需前述 .NET Framework。本地构建和 Actions 产物附带 `.tar.gz.sha256`；GitHub Release 使用汇总校验文件 `SHA256SUMS-v0.1.7`。
 
 开发测试只使用合成数据和注入式凭据库替身，不读取或保存真实凭据，也不访问真实 Krill API。新增 CI 在 Linux、Windows、macOS 构建检查插件；Windows 专项测试使用实际密码控件和模拟剪贴板内容检查整段粘贴、确认及取消。CI 中的控件测试不等于使用者电脑或 Codex 桌面宿主验收。原有 VS Code CI 保持不变。
 
@@ -217,9 +217,7 @@ npm run package
 
 ## 发布文件与对应源码
 
-Codex `v0.1.6` 为独立修复版本；标签、平台包与 [krill-usage-codex-0.1.6-source.zip](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-source.zip) 对应同一发布提交。准确提交与校验值记录在发布说明、`CODEX-RELEASE-0.1.6.json` 和 `SHA256SUMS-codex-0.1.6` 中。
-
-VS Code 保持 `0.1.5`。已有 `v0.1.5` 标签及全部 VS Code/Codex 发布文件保持原样，不覆盖旧包。构建需要仓库共享的 `src/model.js`、`src/jwt.js` 和根目录许可证文件，应保留完整源码结构，不要只下载插件子目录。
+Codex v0.1.7 与 VS Code v0.1.7 共用一次发布。平台包、[完整源码](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-0.1.7-source.zip)、[SHA256SUMS-v0.1.7](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/SHA256SUMS-v0.1.7) 及 [RELEASE-0.1.7.json](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/RELEASE-0.1.7.json) 指向同一发布提交。全部旧版 v0.1.5/v0.1.6 标签及资产原样保留。
 
 ## 来源与许可证
 
