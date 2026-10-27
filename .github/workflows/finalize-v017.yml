@@ -1,0 +1,52 @@
+name: Finalize verified v0.1.7 draft Release
+
+# One-shot recovery for the already uploaded draft. Never rebuild or retag.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release/v0.1.7-finalize.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: krill-usage-v0.1.7-finalize
+  cancel-in-progress: false
+
+jobs:
+  verify-and-finalize:
+    if: github.repository == 'lengmh/Krill-Usage' && github.ref == 'refs/heads/main'
+    name: Verify original CI assets and publish existing draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: finalize-tools
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: d30d59a0c5b2d16ef1c93011705a477529432f32
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          run-id: '40507261208'
+          github-token: ${{ github.token }}
+          repository: lengmh/Krill-Usage
+          pattern: release017-*
+          merge-multiple: true
+          path: source/release-input
+      - name: Verify original source, packages, manifests, draft asset hashes and finalize
+        working-directory: source
+        run: node "../finalize-tools/scripts/finalize-v017.mjs"
+        env:
+          GH_TOKEN: ${{ github.token }}

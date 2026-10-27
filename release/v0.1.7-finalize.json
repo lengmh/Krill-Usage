@@ -1,0 +1,7 @@
+{
+  "version": "0.1.7",
+  "draftReleaseId": 425457464,
+  "originalCommit": "d30d59a0c5b2d16ef1c93011705a477529432f32",
+  "originalWorkflowRun": 40507261208,
+  "operation": "verify the existing draft assets and publish; do not recreate tag or assets"
+}
