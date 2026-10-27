@@ -156,7 +156,8 @@ test('Cloudflare verification pauses automatic password replay until owner chang
   const service=new UsageService({
     credentials:{
       readRevision:async()=>revision,
-      readSession:async()=>({jwt:'expired',account:'fake@example.invalid',password:'private-secret'})
+      readSession:async()=>({jwt:'expired',account:'fake@example.invalid',password:'private-secret'}),
+      replaceSession:async()=>{throw new Error('Cloudflare sign-in never reaches persistence');}
     },
     preferences:{read:()=>({refreshIntervalMinutes:3})},
     fetchUsage:async()=>{throw Object.assign(new Error('expired'),{code:'UNAUTHORIZED'});},
