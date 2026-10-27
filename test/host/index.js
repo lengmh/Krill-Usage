@@ -157,7 +157,8 @@ async function run() {
       assert.equal(item().backgroundColor.id, "statusBarItem.warningBackground");
       assert.equal(item().command, "krillUsage.refresh");
       assert.match(item().tooltip.value, /显示上次数据/);
-      assert.match(item().tooltip.value, /诊断：.*额度 GET/);
+      assert.match(item().tooltip.value, /诊断：/);
+      assert.match(item().tooltip.value, label === "401" ? /登录恢复/ : /额度 GET/);
       assert.doesNotMatch(item().tooltip.value, /synthetic-host-password/);
 
       const retry = h.transport.expect(ACCOUNT_A, account(), { hold: true });
