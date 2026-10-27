@@ -53,7 +53,7 @@ function isRetryableGet(error) {
       !(Number.isFinite(error.retryAfterMs) && error.retryAfterMs > 0));
 }
 function manualInterventionRequired(error) {
-  return ["LOGIN_FAILED", "INTERACTIVE_LOGIN", "INVALID_LOGIN_RESPONSE", "INVALID_CREDENTIALS"].includes(error?.code);
+  return ["LOGIN_FAILED", "INTERACTIVE_LOGIN", "INVALID_LOGIN_RESPONSE", "INVALID_CREDENTIALS", "CF_CHALLENGE"].includes(error?.code);
 }
 
 class KrillUsageService {
