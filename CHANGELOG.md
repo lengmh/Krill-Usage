@@ -1,3 +1,11 @@
+## VS Code 0.1.7 (unreleased)
+
+- Fix transient GET failures: one bounded retry, HTTP status/Retry-After classification, and absolute deadlines.
+- Keep renewed JWT after login even if the following quota GET fails; block automatic sign-in only for definite credential/verification failures.
+- Add short refresh diagnostics to status-bar Hover and a sanitized Krill Usage Output Channel.
+- Bound focus/automatic refresh after failures and coordinate recovery across VS Code windows; discard stale results after account changes.
+- Preserve the 0.1.6 Codex-only release and existing v0.1.5 VS Code release.
+
 ## Codex 0.1.6 (2026-10-19)
 
 - 修复未勾选「记住密码」时仍在加密系统凭据库保留邮箱的问题；新保存现在只包含 JWT。

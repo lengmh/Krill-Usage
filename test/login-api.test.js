@@ -46,7 +46,7 @@ test("password login POSTs only to official Krill HTTPS endpoint and extracts da
 
 test("login rejects redirects, incorrect response, TOTP and Cloudflare challenge", async () => {
   const scenarios = [
-    [{ status: 302, body: "{}", headers: { location: "https://evil.example/" } }, "LOGIN_FAILED"],
+    [{ status: 302, body: "{}", headers: { location: "https://evil.example/" } }, "HTTP"],
     [{ body: JSON.stringify({ success: true, code: 0, data: {} }) }, "INVALID_LOGIN_RESPONSE"],
     [{ body: JSON.stringify({ requires_totp: true }) }, "INTERACTIVE_LOGIN"],
     [{ status: 403, headers: { "cf-mitigated": "challenge" }, body: "<html>" }, "CF_CHALLENGE"],
@@ -68,7 +68,7 @@ test("subscription business code 401 explicitly reports expired JWT", async () =
 
 test("subscription 403/CF and 500 do not masquerade as JWT expiration", async () => {
   for (const [response, code] of [
-    [{ status: 403, body: "forbidden" }, "INVALID_JSON"],
+    [{ status: 403, body: "forbidden" }, "HTTP"],
     [{ status: 403, headers: { "cf-mitigated": "challenge" }, body: "<html>" }, "CF_CHALLENGE"],
     [{ status: 500, body: "{}" }, "HTTP"],
     [{ status: 500, body: '{"code":401}' }, "HTTP"],

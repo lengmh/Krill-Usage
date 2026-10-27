@@ -108,7 +108,7 @@ test("401 with remembered credentials logs in once then retries subscription onc
 test("failed auto login is blocked across subsequent three-minute refreshes", async () => {
   const x = setup({ jwt: "expired", email: "a@example.com", password: "wrong",
     fetch: async () => { const e = new Error("expired"); e.code = "UNAUTHORIZED"; throw e; },
-    login: async () => { throw new Error("incorrect password"); }
+    login: async () => { throw Object.assign(new Error("incorrect password"), { code: "LOGIN_FAILED", phase: "login" }); }
   });
   await x.service.refresh("auto");
   assert.equal(x.service.autoLoginBlocked, true);
