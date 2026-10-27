@@ -175,3 +175,26 @@ test('Cloudflare verification pauses automatic password replay until owner chang
   assert.equal(loginCalls,2,'explicit credential revision permits a new attempt');
   service.dispose();
 });
+
+test('the first 429 still identifies saved credentials during cooldown', async()=>{
+  let now=2000000, calls=0;
+  const service=new UsageService({
+    credentials:{readRevision:async()=> 'account',readSession:async()=>({jwt:'synthetic'})},
+    preferences:{read:()=>({refreshIntervalMinutes:3})},
+    now:()=>now,
+    fetchUsage:async()=>{
+      calls++;
+      throw Object.assign(new Error('private-response'),{code:'RATE_LIMIT',status:429,retryAfterMs:30000});
+    }
+  });
+  try {
+    const first=await service.refresh();
+    assert.equal(first.authenticated,true);
+    assert.equal(first.error.code,'RATE_LIMIT');
+    now+=1000;
+    const second=await service.refresh();
+    assert.equal(second.authenticated,true);
+    assert.equal(second.error.code,'RATE_LIMIT');
+    assert.equal(calls,1);
+  } finally {service.dispose();}
+});
