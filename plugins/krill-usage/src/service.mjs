@@ -103,11 +103,6 @@ export class UsageService {
       if (revision !== this.revision) {
         this.reset(); this.revision = revision; operation.generation = ++this.generation;
       }
-      if (this.cooldownUntil > this.now()) {
-        this.error = this.safeError({code:'RATE_LIMIT',status:429,
-          retryAfterMs:this.cooldownUntil - this.now()}, 'quota', startedAt);
-        return this.view();
-      }
       const session = this.credentials.readSession
         ? await this.credentials.readSession()
         : { jwt: await this.credentials.read() };
@@ -125,6 +120,13 @@ export class UsageService {
       }
       this.authenticated = Boolean(session?.jwt);
       phase = 'quota';
+      // Identify the current session before rate-limit early return so that a
+      // first-ever 429 does not misrepresent an authenticated user as signed out.
+      if (session?.jwt && this.cooldownUntil > this.now()) {
+        this.error = this.safeError({code:'RATE_LIMIT',status:429,
+          retryAfterMs:this.cooldownUntil - this.now()}, 'quota', startedAt);
+        return this.view();
+      }
       if (!session?.jwt) { this.reset(); this.error = this.safeError({code:'NO_JWT'}); }
       else {
         let snapshot;
@@ -135,12 +137,12 @@ export class UsageService {
               !this.credentials.replaceSession || this.renewalAttemptRevision === revision) throw error;
           // One password POST per explicit recovery; transient login transport failures
           // are eligible for a later attempt, but never an immediate password loop.
+          phase = 'login';
           if (this.loginRetryAfter > this.now()) {
             throw Object.assign(new Error('LOGIN_COOLDOWN'), {code:'LOGIN_COOLDOWN',
               retryAfterMs:this.loginRetryAfter - this.now()});
           }
           this.renewalAttemptRevision = revision;
-          phase = 'login';
           let jwt;
           try { jwt = await this.login(session.account, session.password); }
           catch (loginError) {
