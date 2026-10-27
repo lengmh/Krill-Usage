@@ -150,3 +150,27 @@ test('the displayed failure diagnostic is allowlisted and excludes credentials',
   assert.ok(!JSON.stringify(safe).includes('private-token'));
   assert.equal(normalizePayload({view:{error:{code:'HTTP',message:'retry'}}}).view.error.diagnostic,null);
 });
+
+test('Cloudflare verification pauses automatic password replay until owner changes credentials', async()=>{
+  let revision='initial', loginCalls=0;
+  const service=new UsageService({
+    credentials:{
+      readRevision:async()=>revision,
+      readSession:async()=>({jwt:'expired',account:'fake@example.invalid',password:'private-secret'})
+    },
+    preferences:{read:()=>({refreshIntervalMinutes:3})},
+    fetchUsage:async()=>{throw Object.assign(new Error('expired'),{code:'UNAUTHORIZED'});},
+    login:async()=>{
+      loginCalls++;
+      throw Object.assign(new Error('private challenge details'),{code:'CF_CHALLENGE'});
+    }
+  });
+  const first=await service.refresh();
+  assert.equal(first.error.code,'CF_CHALLENGE');
+  await service.refresh();
+  assert.equal(loginCalls,1,'challenge must not cause repeated password POSTs');
+  revision='new-authorized-identity';
+  await service.refresh();
+  assert.equal(loginCalls,2,'explicit credential revision permits a new attempt');
+  service.dispose();
+});

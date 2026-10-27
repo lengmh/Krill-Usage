@@ -144,7 +144,7 @@ export class UsageService {
           let jwt;
           try { jwt = await this.login(session.account, session.password); }
           catch (loginError) {
-            if (owns() && ['NETWORK', 'TIMEOUT', 'HTTP', 'RATE_LIMIT', 'CF_CHALLENGE'].includes(loginError?.code)) {
+            if (owns() && ['NETWORK', 'TIMEOUT', 'HTTP', 'RATE_LIMIT'].includes(loginError?.code)) {
               this.renewalAttemptRevision = undefined;
               this.loginRetryAfter = this.now() + Math.max(15000,
                 Math.min(300000, loginError?.retryAfterMs ?? 15000));
