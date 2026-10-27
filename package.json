@@ -2,7 +2,7 @@
   "name": "krill-usage",
   "displayName": "Krill Usage",
   "description": "非官方 Krill 额度工具：在 VS Code 中查看套餐额度与账户余额。",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "publisher": "lengmh",
   "license": "GPL-3.0-only",
   "icon": "media/icon.png",
@@ -126,9 +126,9 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/service.js && node --check src/statusBar.js && node --check src/api.js && node --check src/model.js && node --check src/format.js && node --check src/jwt.js && node --check src/constants.js",
+    "check": "node --check src/extension.js && node --check src/service.js && node --check src/statusBar.js && node --check src/api.js && node --check src/model.js && node --check src/format.js && node --check src/jwt.js && node --check src/constants.js && node --check src/recoveryLock.js",
     "test:host": "node test/run-host.js",
-    "package": "vsce package --no-dependencies --out krill-usage-0.1.5.vsix"
+    "package": "vsce package --no-dependencies --out krill-usage-0.1.7.vsix"
   },
   "files": [
     "src/**",

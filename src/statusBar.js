@@ -43,7 +43,9 @@ class StatusBarController {
 
     if (!view.authenticated) {
       this.item.text = "$(key) Krill: 登录";
-      this.item.tooltip = "点击使用邮箱、密码登录 Krill（亦可在命令面板手动设置 JWT）";
+      this.item.tooltip = view.error
+        ? `Krill Usage · ${view.error.message}；诊断：${formatFailureDiagnostic(view.error)}；详情见输出面板 Krill Usage`
+        : "点击使用邮箱、密码登录 Krill（亦可在命令面板手动设置 JWT）";
       this.item.command = "krillUsage.login";
       this.item.color = undefined;
       this.item.backgroundColor = undefined;
@@ -57,7 +59,17 @@ class StatusBarController {
       this.item.text = view.refreshing
         ? "$(sync~spin) Krill"
         : `$(warning) Krill ${view.error ? "刷新失败" : "--"}`;
-      this.item.tooltip = view.error?.message ?? "等待额度数据";
+      if (view.error) {
+        const md = new vscode.MarkdownString(undefined, true);
+        md.isTrusted = false;
+        md.appendMarkdown(`**Krill Usage · 刷新失败**  \n`);
+        md.appendMarkdown(`${escapeMarkdown(view.error.message)}  \n`);
+        md.appendMarkdown(`诊断：${escapeMarkdown(formatFailureDiagnostic(view.error))}  \n`);
+        md.appendMarkdown(`详情：输出面板 → Krill Usage（不记录密码或 JWT）`);
+        this.item.tooltip = md;
+      } else {
+        this.item.tooltip = "等待额度数据";
+      }
       this.item.color = undefined;
       this.item.backgroundColor = view.error
         ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
@@ -144,6 +156,8 @@ class StatusBarController {
 
     if (view.error?.message) {
       md.appendMarkdown(`  \n$(warning) ${escapeMarkdown(view.error.message)} · 显示上次数据`);
+      md.appendMarkdown(`  \n诊断：${escapeMarkdown(formatFailureDiagnostic(view.error))}`);
+      md.appendMarkdown(`  \n详情：输出面板 → Krill Usage`);
     } else if (stale) {
       md.appendMarkdown(`  \n$(warning) 数据已超过刷新间隔，请刷新后再确认额度`);
     }
@@ -211,6 +225,24 @@ function statusBarColor(percent, refreshing, thresholds) {
   return statusBarBackground(percent, refreshing, thresholds);
 }
 
+
+// Concise, allowlisted technical context; never put URLs, headers, response
+// bodies or any authentication material in a hover or an Output Channel.
+function formatFailureDiagnostic(error) {
+  const phase = { subscription: "额度 GET", login: "登录 POST", storage: "凭据存储", recovery: "登录恢复" }[error?.phase] ?? "额度 GET";
+  const code = /^[A-Z_]{2,32}$/.test(error?.code ?? "") ? error.code : "ERROR";
+  const info = [`${phase} · ${code}`];
+  if (Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599) info.push(`HTTP ${error.status}`);
+  if (/^[A-Z_]{3,48}$/.test(error?.networkCode ?? "")) info.push(error.networkCode);
+  if (error?.attempts === 2) info.push("已尝试 2 次");
+  if (Number.isFinite(error?.elapsedMs) && error.elapsedMs >= 0) info.push(`耗时 ${(error.elapsedMs / 1000).toFixed(1)}s`);
+  if (Number.isFinite(error?.at)) info.push(new Date(error.at).toLocaleTimeString("zh-CN", { hour12: false }));
+  if (Number.isFinite(error?.nextRetryAt) && error.nextRetryAt > Date.now()) {
+    info.push(`下次自动尝试不早于 ${new Date(error.nextRetryAt).toLocaleTimeString("zh-CN", { hour12: false })}`);
+  }
+  return info.join(" · ");
+}
+
 function escapeMarkdown(value) {
   return String(value ?? "").replace(/[\\`*_{}\[\]()<>#+\-.!|]/g, "\\$&");
 }
@@ -225,5 +257,6 @@ module.exports = {
   STATUS_BAR_ICONS,
   DEFAULT_WARNING_PERCENT,
   DEFAULT_CRITICAL_PERCENT,
-  DEFAULT_STATUS_BAR_ICON
+  DEFAULT_STATUS_BAR_ICON,
+  formatFailureDiagnostic
 };

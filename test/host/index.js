@@ -148,6 +148,7 @@ async function run() {
       const lastSuccessAt = view().lastSuccessAt;
       assert.equal(item().backgroundColor, undefined, "Healthy 38% exceeds the configured 30%");
       h.transport.expect(ACCOUNT_A, failure);
+      if (label === "network") h.transport.expect(ACCOUNT_A, failure); // one bounded GET retry
       await execute("refresh");
       assert.equal(view().error.code, code);
       assert.equal(view().snapshot, snapshot);
@@ -156,6 +157,8 @@ async function run() {
       assert.equal(item().backgroundColor.id, "statusBarItem.warningBackground");
       assert.equal(item().command, "krillUsage.refresh");
       assert.match(item().tooltip.value, /显示上次数据/);
+      assert.match(item().tooltip.value, /诊断：.*额度 GET/);
+      assert.doesNotMatch(item().tooltip.value, /synthetic-host-password/);
 
       const retry = h.transport.expect(ACCOUNT_A, account(), { hold: true });
       const refreshing = execute("refresh");

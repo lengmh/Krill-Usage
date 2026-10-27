@@ -154,12 +154,12 @@ test("failed refresh retains marked last data until a retry succeeds", async () 
   const successAt = service.getView().lastSuccessAt;
   const failing = service.refresh("auto", { silent: true });
   await tick();
-  requests[1].reject(Object.assign(new Error("Synthetic offline"), { code: "NETWORK" }));
+  requests[1].reject(Object.assign(new Error("Synthetic invalid response"), { code: "INVALID_JSON" }));
   assert.equal(await failing, null);
   assert.deepEqual(service.getView().snapshot, account("10"));
   assert.equal(service.getView().lastSuccessAt, successAt);
   const retry = service.refresh();
-  assert.equal(service.getView().error.code, "NETWORK", "failed data remains marked during retry");
+  assert.equal(service.getView().error.code, "INVALID_JSON", "failed data remains marked during retry");
   await tick();
   requests[2].resolve(account("20"));
   await retry;

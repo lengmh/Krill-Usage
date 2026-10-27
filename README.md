@@ -43,21 +43,22 @@
 - 没有可用 active 套餐时显示账户余额，包括所有 active 套餐额度为 0 的情况。
 - 悬停查看全部套餐、余额、状态、百分比和时间信息，不创建 Webview 或编辑器标签页。
 - 支持状态栏图标、余额显示和低额度阈值设置；修改显示设置立即生效。
-- 查询失败时直接标注「刷新失败 · 旧数据」；数据超过刷新间隔时标注「数据已过期」。请勿将旧数据视为当前可用额度。
+- 查询失败时直接标注「刷新失败 · 旧数据」；Hover 提供失败阶段、HTTP 状态或安全网络错误码、重试次数与时间，输出面板 `Krill Usage` 有更简短的诊断日志（不含邮箱、密码、JWT 或响应正文）。数据超过刷新间隔时标注「数据已过期」。请勿将旧数据视为当前可用额度。
+- 偶发额度 GET 网络/5xx 故障最多重试一次；失败后短暂冷却，尊重 HTTP 429/503 的 `Retry-After`；手动点击不绕过服务器限流。单次请求有绝对超时，登录成功后先安全保存新 JWT，再查询额度。
 - 切换或清除凭据后，丢弃旧账号的迟到请求结果。
 
 ### 安装
 
 需要桌面版 VS Code 1.95 或更新版本。此扩展使用 Node.js API，不支持纯浏览器版 VS Code。
 
-1. 下载 [krill-usage-0.1.5.vsix](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.5/krill-usage-0.1.5.vsix)。
+1. 下载 [krill-usage-0.1.7.vsix](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-0.1.7.vsix)。
 2. 打开 Extensions，选择右上角 `...` → **Install from VSIX...**，选择下载的 VSIX。
 3. 执行 **Developer: Reload Window**。
 
 也可从命令行安装：
 
 ```powershell
-code --install-extension .\krill-usage-0.1.5.vsix --force
+code --install-extension .\krill-usage-0.1.7.vsix --force
 ```
 
 发布者标识为 `lengmh`。此前手动安装的 `krill-ai.krill-usage` 属于不同扩展标识，请先卸载旧版本，避免两个实例同时轮询。新标识不会自动继承旧标识的 SecretStorage 凭据，需要重新设置 JWT。
@@ -68,10 +69,10 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 
 1. 执行 **Krill: Log In (Email/Password)**，在原生输入框输入邮箱与密码。
 2. 扩展通过 Krill 固定 HTTPS 登录接口取得 JWT，并验证额度接口后保存凭据。
-3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；失败后在当前扩展会话中暂停自动登录，需主动重新登录；重载扩展后可再次尝试。
+3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；仅确定账号密码失效或需要人工验证时暂停自动登录；网络/服务器临时故障不会锁定账号，已获取的新 JWT 也不会因额度查询失败被丢弃。
 4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
-本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 为 v0.1.5，Codex 为 v0.1.6；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
+本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 为 v0.1.7，Codex 为 v0.1.6；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
 
 ### 命令
 
@@ -100,12 +101,12 @@ code --install-extension .\krill-usage-0.1.5.vsix --force
 ### 已知限制与排查
 
 - 密码登录尚未使用真实 Krill 账号验证；接口变化或附加验证可能导致失败。可改用 `Krill: Set JWT`。
-- JWT 过期：已记住密码时尝试一次恢复；失败后使用 `Krill: Log In (Email/Password)` 或手动 JWT。
-- 网络错误：恢复连接后点击状态栏重试。
+- JWT 过期：已记住密码时尝试恢复；只有确认账号密码错误或要求人工验证时暂停自动重登。网络故障使用有上限的退避，避免重复密码登录。
+- 网络错误：Hover 可查看本次失败的阶段、错误代码、HTTP 状态及下次允许请求时间。`View → Output → Krill Usage` 可查看无敏感字段的请求诊断；网络恢复后可手动重试，但 429 / `Retry-After` 冷却期间不会重复请求。
 - Cloudflare 验证：插件会报告验证错误，不自动完成或绕过验证。
 - 查询失败后可能保留上次成功结果，会明确标为旧数据；成功刷新后恢复正常显示。
 - 超过刷新间隔的数据会标为过期。时间显示每分钟更新一次，因此纯时间触发的标记最多有约 1 分钟显示延迟。
-- 多窗口共享 SecretStorage，但没有跨窗口原子事务。自动恢复提交前会检查账号是否改变，丢弃网络等待期间被其他窗口清除或替换的凭据；仍存在极短的检查到写入竞态。切换或清除凭据前请关闭其他运行本扩展的窗口，操作后再打开，避免重叠写入。
+- 多窗口共享 SecretStorage。自动密码重登使用本地全局存储中的短期排他锁并重读共享凭据，避免同一时刻重复登录；清除或切换账号时丢弃迟到的旧查询结果。SecretStorage 本身仍不提供跨进程原子比较交换，极端并发下不能保证完全消除写入竞态。
 - 额度和计费以 Krill 服务端为准；接口或登录方式变化可能导致扩展失效。
 - `extensionKind: ["ui"]`：使用 Remote SSH、WSL 或 Dev Container 时优先在本地 UI Extension Host 运行。
 
@@ -186,7 +187,7 @@ xvfb-run -a npm run test:host
 npm run package
 ```
 
-输出为 `krill-usage-0.1.5.vsix`。CI 不创建 Release，不发布到 Marketplace。
+输出为 `krill-usage-0.1.7.vsix`。CI 不创建 Release，不发布到 Marketplace。
 
 ### Codex
 
