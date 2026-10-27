@@ -188,3 +188,17 @@ test("hover diagnosis includes phase, code, retry and cooldown but not secret",(
   assert.match(line,/额度 GET.*RATE_LIMIT.*HTTP 429.*下次自动尝试/);
   assert.doesNotMatch(line,/do-not-show/);
 });
+
+test("Cloudflare challenge during auto-login requires manual action and never repeats password POST",async()=>{
+  let logins=0;
+  const x=setup({apiGet: async()=>{throw err("UNAUTHORIZED",401);},
+    apiLogin:async()=>{ logins++; throw err("CF_CHALLENGE",403,{phase:"login"}); }});
+  try{
+    await x.service.refresh("auto");
+    assert.equal(x.service.error.code,"CF_CHALLENGE");
+    assert.equal(x.service.autoLoginBlocked,true);
+    await x.service.refresh("manual");
+    await x.service.refresh("auto");
+    assert.equal(logins,1);
+  }finally{x.service.dispose();}
+});
