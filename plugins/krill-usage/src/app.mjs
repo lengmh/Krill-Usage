@@ -1,7 +1,7 @@
 import { App, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import {
   createController, usageModel, money, remainingPercent, percentText,
-  quotaTone, statusText, planTypeText, dateText, countdown, validatePreferences
+  quotaTone, statusText, planTypeText, dateText, countdown, validatePreferences, diagnosticText
 } from './view.mjs';
 
 const CREDENTIAL_COMMAND = 'node dist/credential-cli.cjs login';
@@ -47,7 +47,10 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
   const statusAge = el('span', 'sync-age');
   status.setAttribute('role', 'status');
   status.append(statusLabel, statusAge);
-  const error = el('p', 'error-detail');
+  const error = el('div', 'error-detail');
+  const errorMessage = el('span', 'error-message');
+  const errorDiagnostic = el('span', 'error-diagnostic');
+  error.append(errorMessage, errorDiagnostic);
   const hero = el('section', 'hero-card');
   const heroBody = el('div', 'hero-body');
   const heroLabel = el('p', 'field-label');
@@ -175,7 +178,10 @@ export function mountKrillApp({ app, root, doc = document, win = window }) {
     statusAge.textContent = fresh.ageText;
     statusAge.title = `上次成功同步：${fresh.timestamp}`;
     error.hidden = !model.view.error;
-    error.textContent = model.view.error?.message ?? '';
+    errorMessage.textContent = model.view.error?.message ?? '';
+    const detail = diagnosticText(model.view.error);
+    errorDiagnostic.textContent = detail;
+    errorDiagnostic.hidden = !detail;
     hero.hidden = !model.view.snapshot;
     heroLabel.textContent = model.primaryLabel;
     heroAmount.textContent = model.primaryValue;

@@ -110,6 +110,35 @@ export function validatePreferences(values) {
   return { set };
 }
 
+function normalizeDiagnostic(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const bounded = (n, min, max) => Number.isFinite(n) && n >= min && n <= max ? n : null;
+  const phases = ['quota', 'login', 'storage', 'bridge'];
+  const networks = ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND',
+    'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'];
+  return {
+    phase: phases.includes(value.phase) ? value.phase : 'quota',
+    status: Number.isInteger(value.status) ? bounded(value.status, 100, 599) : null,
+    networkCode: networks.includes(value.networkCode) ? value.networkCode : null,
+    attempts: Number.isInteger(value.attempts) ? bounded(value.attempts, 1, 2) : null,
+    elapsedMs: bounded(value.elapsedMs, 0, 120000),
+    at: bounded(value.at, 0, 8640000000000000),
+    retryAfterMs: bounded(value.retryAfterMs, 0, 300000)
+  };
+}
+export function diagnosticText(error) {
+  if (!error?.diagnostic) return '';
+  const value = error.diagnostic;
+  const bits = [value.phase === 'login' ? '登录 POST' : value.phase === 'storage' ? '本地凭据' : value.phase === 'bridge' ? '面板通信' : '额度 GET'];
+  if (value.status !== null) bits.push(`HTTP ${value.status}`);
+  if (value.networkCode) bits.push(value.networkCode);
+  if (value.attempts !== null) bits.push(`${value.attempts} 次尝试`);
+  if (value.elapsedMs !== null) bits.push(`耗时 ${(value.elapsedMs / 1000).toFixed(1)}s`);
+  if (value.retryAfterMs !== null && value.retryAfterMs > 0) bits.push(`冷却约 ${Math.ceil(value.retryAfterMs / 1000)}s`);
+  if (value.at !== null) bits.push(new Date(value.at).toLocaleTimeString('zh-CN', {hour12:false}));
+  return `诊断：${bits.join(' · ')}`;
+}
+
 export function normalizePayload(payload = {}) {
   const view = payload.view ?? {};
   return {
@@ -122,7 +151,7 @@ export function normalizePayload(payload = {}) {
         creditBalance: view.snapshot.creditBalance ?? null,
         subscriptions: view.snapshot.subscriptions.filter((plan) => plan && typeof plan === 'object')
       } : null,
-      error: view.error && typeof view.error.code === 'string' ? { code: view.error.code, message: typeof view.error.message === 'string' ? view.error.message : '查询失败，请稍后重试。' } : null,
+      error: view.error && typeof view.error.code === 'string' ? { code: view.error.code, message: typeof view.error.message === 'string' ? view.error.message : '查询失败，请稍后重试。', diagnostic: normalizeDiagnostic(view.error.diagnostic) } : null,
       refreshing: view.refreshing === true,
       lastSuccessAt: numberOrNull(view.lastSuccessAt) ?? 0,
       stateRevision: Number.isSafeInteger(view.stateRevision) && view.stateRevision >= 0 ? view.stateRevision : 0,
@@ -230,7 +259,7 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
     emit();
     inFlight = Promise.resolve().then(() => {
       if (state.disposed || token !== generation) return null;
-      return callTool({ name, arguments: args }, { signal: requestAborter.signal, timeout: 20000 });
+      return callTool({ name, arguments: args }, { signal: requestAborter.signal, timeout: name === 'krill.refresh' ? 60000 : 20000 });
     }).then((result) => {
       if (state.disposed || token !== generation) return false;
       const accepted = accept(result, { owned: true });
@@ -244,7 +273,9 @@ export function createController({ callTool, onChange = () => {}, initialPage = 
       if (state.disposed || token !== generation) return false;
       state.notice = name === 'krill.updateSettings' ? '连接中断，设置未确认保存。请重新加载后检查。' : '连接中断或请求超时，请重试。';
       if (name === 'krill.refresh') {
-        state.payload.view.error = { code: 'TRANSPORT_ERROR', message: '连接中断或请求超时，请重试。' };
+        state.payload.view.error = { code: 'TRANSPORT_ERROR', message: '连接中断或请求超时，请重试。',
+          diagnostic: {phase:'bridge',status:null,networkCode:null,attempts:1,
+            elapsedMs:null,at:Date.now(),retryAfterMs:null} };
       }
       return false;
     }).finally(() => {

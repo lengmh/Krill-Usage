@@ -116,7 +116,7 @@ test('controller coalesces repeated refresh and does not navigate on app calls',
   await flush();
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0].name, 'krill.refresh');
-  assert.equal(calls[0][1].timeout, 20000);
+  assert.equal(calls[0][1].timeout, 60000);
   pending.resolve(result());
   assert.equal(await one, true);
   assert.equal(controller.state.page, 'settings');
@@ -420,4 +420,25 @@ test('pagehide and unload clear timers including bfcache suspension', async () =
     assert.equal(ui.timers.size, 0);
     assert.equal(ui.mounted.controller.state.disposed, true);
   } finally { ui.close(); }
+});
+
+test('DOM displays a concise safe error diagnosis alongside the existing failure message', async () => {
+  const data = payload();
+  data.view.error = {code:'NETWORK',message:'网络连接失败',diagnostic:{
+    phase:'quota',status:503,networkCode:'ECONNRESET',attempts:2,
+    elapsedMs:1300,at:Date.UTC(2026,9,27,10,30),
+    jwt:'private-token',password:'private-password'
+  }};
+  const ui = fixture(async () => result(data));
+  try {
+    await ui.mounted.connected;
+    const text = ui.doc.querySelector('.error-detail').textContent;
+    assert.match(text,/网络连接失败/);
+    assert.match(text,/诊断：额度 GET/);
+    assert.match(text,/HTTP 503/);
+    assert.match(text,/ECONNRESET/);
+    assert.match(text,/2 次尝试/);
+    assert.doesNotMatch(text,/private-token|private-password/);
+    assert.equal(ui.doc.querySelector('.error-diagnostic').hidden,false);
+  } finally {ui.close();}
 });
