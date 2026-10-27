@@ -68,7 +68,7 @@ code --install-extension .\krill-usage-0.1.7.vsix --force
 `krill_jwt` 是账号登录凭据，不能保证只读权限。请先阅读随包提供的 [PRIVACY.md](PRIVACY.md)，不要公开、截图分享或提交到仓库。
 
 1. 执行 **Krill: Log In (Email/Password)**，在原生输入框输入邮箱与密码。
-2. 扩展通过 Krill 固定 HTTPS 登录接口取得 JWT，并验证额度接口后保存凭据。
+2. 扩展通过 Krill 固定 HTTPS 登录接口取得 JWT，先保存凭据，再查询额度；若额度 GET 暂时失败，已获取的 JWT 仍可供后续刷新使用。
 3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；仅确定账号密码失效或需要人工验证时暂停自动登录；网络/服务器临时故障不会锁定账号，已获取的新 JWT 也不会因额度查询失败被丢弃。
 4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
