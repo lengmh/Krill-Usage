@@ -1,4 +1,4 @@
-import { fetchSubscription, loginWithPassword } from './api.cjs';
+import { fetchSubscriptionWithRetry, loginWithPassword } from './api.cjs';
 import { randomUUID } from 'node:crypto';
 
 const messages = {
@@ -8,6 +8,8 @@ const messages = {
   INVALID_LOGIN_RESPONSE: '登录响应无效，请重新登录。', INVALID_CREDENTIALS: '登录信息无效，请重新登录。',
   CREDENTIAL_CHANGED: '账户凭据已变更，请刷新后重试。',
   CF_CHALLENGE: 'Krill 要求 Cloudflare 验证，请在浏览器中检查账户。',
+  RATE_LIMIT: 'Krill 请求被限流，请在冷却时间结束后刷新。',
+  LOGIN_COOLDOWN: '登录服务暂时不可用，短暂冷却后可重新尝试。',
   HTTP: 'Krill 请求失败，请稍后重试。', INVALID_JSON: 'Krill 返回了无法解析的数据。',
   INVALID_RESPONSE: 'Krill API 返回结构无法识别。', NETWORK: '网络连接失败，请重试。',
   TIMEOUT: '请求超时，请重试。', TOO_LARGE: 'Krill 响应超出大小限制。',
@@ -15,21 +17,39 @@ const messages = {
   ERROR: '额度查询失败，请重试。'
 };
 export class UsageService {
-  constructor({credentials, preferences, fetchUsage = fetchSubscription, login = loginWithPassword, now = Date.now}) {
+  constructor({credentials, preferences, fetchUsage = fetchSubscriptionWithRetry, login = loginWithPassword, now = Date.now}) {
     this.credentials = credentials; this.preferences = preferences; this.fetchUsage = fetchUsage; this.login = login; this.now = now;
     this.instanceId = randomUUID();
     this.generation = 0; this.stateRevision = 0; this.snapshotRevision = 0;
     this.active = null; this.disposed = false; this.revision = undefined;
     this.renewalAttemptRevision = undefined;
+    this.cooldownUntil = 0;
+    this.loginRetryAfter = 0;
     this.reset();
     this.subscription = credentials.onDidChange?.(() => { void this.read(); });
   }
   // Order account resets independently of request ownership or success timestamps.
-  reset() { this.stateRevision++; this.snapshot = null; this.error = null; this.lastSuccessAt = 0; this.authenticated = false; }
+  reset() {
+    this.stateRevision++; this.snapshot = null; this.error = null; this.lastSuccessAt = 0;
+    this.authenticated = false; this.cooldownUntil = 0; this.loginRetryAfter = 0;
+  }
   invalidate() { this.generation++; this.active = null; this.revision = undefined; this.reset(); }
-  safeError(error) {
+  safeError(error, phase = 'quota', startedAt = this.now()) {
     const code = Object.hasOwn(messages, error?.code) ? error.code : 'ERROR';
-    return {code, message: messages[code]};
+    const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599
+      ? error.status : null;
+    const networkCode = ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND',
+      'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'].includes(error?.networkCode)
+      ? error.networkCode : null;
+    const attempts = Number.isInteger(error?.attempts) && error.attempts >= 1 && error.attempts <= 2
+      ? error.attempts : 1;
+    const retryAfterMs = Number.isFinite(error?.retryAfterMs)
+      ? Math.max(0, Math.min(300000, error.retryAfterMs)) : null;
+    return {code, message: messages[code], diagnostic: {
+      phase: ['quota', 'login', 'storage'].includes(phase) ? phase : 'quota',
+      status, networkCode, attempts, elapsedMs: Math.max(0, Math.min(120000, this.now() - startedAt)),
+      at: this.now(), retryAfterMs
+    }};
   }
   view() {
     const refreshMinutes = this.preferences.read().refreshIntervalMinutes;
@@ -66,6 +86,8 @@ export class UsageService {
     return operation.promise;
   }
   async run(operation) {
+    const startedAt = this.now();
+    let phase = 'storage';
     const owns = () => !this.disposed && this.active === operation && operation.generation === this.generation;
     let revision;
     const current = async () => {
@@ -80,6 +102,11 @@ export class UsageService {
       if (!owns()) return this.view();
       if (revision !== this.revision) {
         this.reset(); this.revision = revision; operation.generation = ++this.generation;
+      }
+      if (this.cooldownUntil > this.now()) {
+        this.error = this.safeError({code:'RATE_LIMIT',status:429,
+          retryAfterMs:this.cooldownUntil - this.now()}, 'quota', startedAt);
+        return this.view();
       }
       const session = this.credentials.readSession
         ? await this.credentials.readSession()
@@ -97,6 +124,7 @@ export class UsageService {
         if (!owns() || !await current() || !owns()) return this.view();
       }
       this.authenticated = Boolean(session?.jwt);
+      phase = 'quota';
       if (!session?.jwt) { this.reset(); this.error = this.safeError({code:'NO_JWT'}); }
       else {
         let snapshot;
@@ -105,9 +133,25 @@ export class UsageService {
           if (!owns() || !await current() || !owns()) return this.view();
           if (error?.code !== 'UNAUTHORIZED' || !session.account || !session.password ||
               !this.credentials.replaceSession || this.renewalAttemptRevision === revision) throw error;
-          // One recovery and one quota retry per explicit refresh, never a loop.
+          // One password POST per explicit recovery; transient login transport failures
+          // are eligible for a later attempt, but never an immediate password loop.
+          if (this.loginRetryAfter > this.now()) {
+            throw Object.assign(new Error('LOGIN_COOLDOWN'), {code:'LOGIN_COOLDOWN',
+              retryAfterMs:this.loginRetryAfter - this.now()});
+          }
           this.renewalAttemptRevision = revision;
-          const jwt = await this.login(session.account, session.password);
+          phase = 'login';
+          let jwt;
+          try { jwt = await this.login(session.account, session.password); }
+          catch (loginError) {
+            if (owns() && ['NETWORK', 'TIMEOUT', 'HTTP', 'RATE_LIMIT', 'CF_CHALLENGE'].includes(loginError?.code)) {
+              this.renewalAttemptRevision = undefined;
+              this.loginRetryAfter = this.now() + Math.max(15000,
+                Math.min(300000, loginError?.retryAfterMs ?? 15000));
+            }
+            throw loginError;
+          }
+          phase = 'storage';
           if (!owns() || !await current() || !owns()) return this.view();
           // Own writes briefly expose a "changing" marker. Watchers and read()
           // defer during this window; the returned committed revision is checked
@@ -121,6 +165,7 @@ export class UsageService {
             this.revision = revision;
           } finally { operation.renewing = false; }
           if (!owns() || !await current() || !owns()) return this.view();
+          phase = 'quota';
           try { snapshot = await this.fetchUsage(jwt); }
           catch (retryError) {
             // Panel refreshes must not repeatedly POST a saved password after a
@@ -131,6 +176,7 @@ export class UsageService {
         }
         if (!owns() || !await current() || !owns()) return this.view();
         this.snapshot = snapshot; this.error = null; this.lastSuccessAt = this.now();
+        this.cooldownUntil = 0; this.loginRetryAfter = 0;
       }
     } catch (error) {
       if (owns()) {
@@ -140,7 +186,11 @@ export class UsageService {
         } catch { if (owns()) { this.reset(); error = {code:'SECRET_STORAGE'}; } }
         if (owns()) {
           if (error?.code === 'SECRET_STORAGE') this.reset();
-          this.error = this.safeError(error);
+          if (error?.code === 'RATE_LIMIT') {
+            this.cooldownUntil = Math.max(this.cooldownUntil,
+              this.now() + Math.max(1000, Math.min(300000, error?.retryAfterMs ?? 60000)));
+          }
+          this.error = this.safeError(error, phase, startedAt);
         }
       }
     } finally { if (owns()) this.active = null; }
