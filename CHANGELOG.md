@@ -1,4 +1,12 @@
-## VS Code 0.1.7 (unreleased)
+## 0.1.7 (VS Code + Codex, 2026-10-27)
+
+- VS Code: retry eligible transient quota GET failures once; respect 429/Retry-After, socket-independent deadlines and bounded focus/automatic refresh cooldowns.
+- VS Code: save a renewed JWT before the next quota GET, coordinate multi-window renewal, and stop automatic password replay on Cloudflare/manual verification.
+- Codex App: bounded GET retry and 429 cooldown without losing authenticated state; transient password-login transport faults can recover later without replay loops.
+- Codex App: concise allowlisted error diagnostics in its quota panel, preserving existing vault CAS/lock and panel-visible refresh behavior.
+- Both clients: synthetic regression tests, fixed first-party HTTPS endpoints and safe diagnostics; previous releases remain immutable.
+
+## VS Code 0.1.7 (pre-release audit notes)
 
 - Fix transient GET failures: one bounded retry, HTTP status/Retry-After classification, and absolute deadlines.
 - Keep renewed JWT after login even if the following quota GET fails; block automatic sign-in only for definite credential/verification failures.

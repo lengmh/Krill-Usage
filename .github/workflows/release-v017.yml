@@ -1,0 +1,123 @@
+name: Release v0.1.7 - VS Code and Codex
+
+# One-shot trigger. Only the reviewed release commit adds this marker on main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release/v0.1.7.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: krill-usage-v0.1.7-release
+  cancel-in-progress: false
+
+jobs:
+  vscode-package:
+    name: Verify and package VS Code v0.1.7
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: node --check scripts/release-v017.mjs
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm run package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release017-vscode
+          path: krill-usage-0.1.7.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+  vscode-host:
+    name: VS Code v0.1.7 extension host (${{ matrix.vscode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ['1.95.0', 'stable']
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Test production code in a real VS Code extension host
+        run: xvfb-run -a npm run test:host
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode }}
+
+  codex-package:
+    name: Verify and package Codex v0.1.7 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    defaults:
+      run:
+        working-directory: plugins/krill-usage
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: plugins/krill-usage/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm run build
+      - run: npm test
+        timeout-minutes: 4
+      - run: npm run package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release017-codex-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            plugins/krill-usage/artifacts/*.tar.gz
+            plugins/krill-usage/artifacts/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish and verify immutable v0.1.7 GitHub Release
+    needs: [vscode-package, vscode-host, codex-package]
+    if: github.repository == 'lengmh/Krill-Usage' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release017-*
+          merge-multiple: true
+          path: release-input
+      - name: Validate exact-tag packages and publish only after byte verification
+        run: node scripts/release-v017.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

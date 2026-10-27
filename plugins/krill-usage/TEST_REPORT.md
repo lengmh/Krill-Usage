@@ -1,3 +1,11 @@
+# Codex 0.1.7 verification candidate (2026-10-27)
+
+- Codex PR #6 tested eligible GET retries, HTTP 429 cooldown and Retry-After, transient login reauthorization, Cloudflare replay prevention, and safe panel diagnostics.
+- CI verified Codex package builds and unit tests for Windows, macOS and Linux. The unified release must independently build from the exact final release SHA and provide SHA256 checksums for each asset.
+- No live Krill account, Cloudflare or desktop Codex deployment validation claimed.
+
+---
+
 # Codex 0.1.6 verification
 
 Date: 2026-10-19. All account data and API responses in tests are synthetic; no real credentials were requested, accessed, transmitted or stored.

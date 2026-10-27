@@ -1,0 +1,11 @@
+{
+  "version": "0.1.7",
+  "tag": "v0.1.7",
+  "clients": [
+    "VS Code extension",
+    "Codex App plugin"
+  ],
+  "strategy": "single verified source commit, separate platform archives, immutable GitHub Release",
+  "workflow": ".github/workflows/release-v017.yml",
+  "note": "This marker is intentionally created exactly once on main through the release PR; do not modify it after publication."
+}

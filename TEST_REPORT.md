@@ -1,4 +1,13 @@
-# VS Code 0.1.7 修复候选验证（待 CI / 用户现场验收）
+# v0.1.7 统一发布验证说明
+
+- 本次 v0.1.7 同时构建 VS Code 扩展与 Codex App 三平台包，并在新 Release 中记录同一发布提交、构建来源和每份资产 SHA256。
+- 合并前 PR #5 的 VS Code unit/package、VS Code 1.95.0 和 stable 宿主测试全部成功；PR #6 的 Codex Windows/macOS/Linux 测试与 VS Code 原有回归也通过。
+- 一次性 GitHub Release 工作流会针对精确的最终合并提交再次构建和验证。发布时以 Release manifest 和 Actions 作最终依据。
+- 所有自动化测试仅使用合成凭据/模拟 HTTPS；未验证真实 Krill/Cloudflare、用户系统凭据库及真实 Codex 桌面端端到端操作。
+
+---
+
+# VS Code 0.1.7 修复候选验证（PR 阶段）
 
 - 以 v0.1.5 VS Code 发布源码为核心回归基线；单元模拟使用合成 JWT/邮箱/密码与本地 HTTP socket，不访问真实 Krill 账号。
 - 新增网络绝对超时、非 JSON 429/502/503、Retry-After、受控 GET 重试、自动登录成功后 GET 超时、跨窗口恢复排他锁、跨窗口清除旧请求结果，以及 Hover 安全诊断测试。

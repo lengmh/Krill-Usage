@@ -72,7 +72,7 @@ code --install-extension .\krill-usage-0.1.7.vsix --force
 3. 默认记住邮箱和密码，JWT 明确失效时自动重新登录一次；仅确定账号密码失效或需要人工验证时暂停自动登录；网络/服务器临时故障不会锁定账号，已获取的新 JWT 也不会因额度查询失败被丢弃。
 4. 如只想保存 JWT，关闭 **Krill Usage: Remember Password**。已有密码会被清除，JWT 保留；重新开启后需再次手动登录。
 
-本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 为 v0.1.7，Codex 为 v0.1.6；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
+本版升级保留 `lengmh.krill-usage` 标识和原有 JWT。VS Code 与 Codex 均为 v0.1.7；Codex 登录使用独立的 Windows 原生窗口和系统凭据库，详见下方说明。
 
 ### 命令
 
@@ -112,15 +112,15 @@ code --install-extension .\krill-usage-0.1.7.vsix --force
 
 ## Codex 插件
 
-Codex 插件版本为 `0.1.6`。面板显示全部套餐、账户余额、额度重置时间和套餐到期时间；点击刷新直接调用本地服务。面板可见时按设置查询，隐藏或关闭后停止界面定时查询，不提供常驻状态栏或无限期后台轮询。
+Codex 插件版本为 `0.1.7`。面板显示全部套餐、账户余额、额度重置时间和套餐到期时间；点击刷新直接调用本地服务。面板可见时按设置查询，隐藏或关闭后停止界面定时查询，不提供常驻状态栏或无限期后台轮询。
 
 ### 下载与安装
 
-从本仓库的 [v0.1.6 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.6) 下载与目标系统和 CPU 架构匹配的平台包，以及 [SHA256SUMS-codex-0.1.6](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/SHA256SUMS-codex-0.1.6) 校验文件：
+从本仓库的 [v0.1.7 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.7) 下载与目标系统和 CPU 架构匹配的平台包，以及 [SHA256SUMS-v0.1.7](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/SHA256SUMS-v0.1.7) 校验文件：
 
-- Windows x64：[krill-usage-codex-0.1.6-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-win32-x64.tar.gz)
-- macOS Apple Silicon：[krill-usage-codex-0.1.6-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-darwin-arm64.tar.gz)
-- Linux x64：[krill-usage-codex-0.1.6-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-linux-x64.tar.gz)
+- Windows x64：[krill-usage-codex-0.1.7-win32-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-win32-x64.tar.gz)
+- macOS Apple Silicon：[krill-usage-codex-0.1.7-darwin-arm64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-darwin-arm64.tar.gz)
+- Linux x64：[krill-usage-codex-0.1.7-linux-x64.tar.gz](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-codex-0.1.7-linux-x64.tar.gz)
 
 平台包包含对应平台的原生凭据库模块，不能跨平台复制使用。macOS/Linux 包不提供新 JWT 输入方式；没有已存凭据时，无法完成账户设置。其他平台或架构可参考[源码构建说明](plugins/krill-usage/README.md#从源码构建并安装)，构建成功不等同于宿主验收通过。
 
@@ -129,14 +129,14 @@ Codex 插件版本为 `0.1.6`。面板显示全部套餐、账户余额、额度
 1. 在下载目录校验平台包。Windows PowerShell 示例：
 
    ```powershell
-   Get-FileHash .\krill-usage-codex-0.1.6-win32-x64.tar.gz -Algorithm SHA256
+   Get-FileHash .\krill-usage-codex-0.1.7-win32-x64.tar.gz -Algorithm SHA256
    ```
 
-   将输出的完整 SHA256 值与 `SHA256SUMS-codex-0.1.6` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
+   将输出的完整 SHA256 值与 `SHA256SUMS-v0.1.7` 中同名文件的校验值比较，忽略字母大小写。不一致时停止安装并重新下载。
 2. 校验一致后解压。Windows 示例：
 
    ```powershell
-   tar -xzf krill-usage-codex-0.1.6-win32-x64.tar.gz
+   tar -xzf krill-usage-codex-0.1.7-win32-x64.tar.gz
    ```
 
    其他平台将文件名替换为下载的对应平台包。解压后的 `krill-usage-codex` 根目录包含 `.agents/plugins/marketplace.json` 和 `plugins/krill-usage`。
@@ -154,10 +154,9 @@ Codex 插件版本为 `0.1.6`。面板显示全部套餐、账户余额、额度
 
 ### 发布文件与源码对应关系
 
-`v0.1.6` 是 Codex 专用修复版本，修正未勾选「记住密码」仍保留邮箱的问题，并在升级后刷新时清理旧版残留邮箱。标签、平台包和单独的 [Codex 源码包](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.6/krill-usage-codex-0.1.6-source.zip) 对应同一发布提交；详情见 `CODEX-RELEASE-0.1.6.json` 和 `SHA256SUMS-codex-0.1.6`。
+本次 [v0.1.7 Release](https://github.com/lengmh/Krill-Usage/releases/tag/v0.1.7) 同时提供 VS Code VSIX 和 Codex 三平台包，全部从同一冻结提交构建。下载 [完整源码](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/krill-usage-0.1.7-source.zip)，通过 [SHA256SUMS-v0.1.7](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/SHA256SUMS-v0.1.7) 和 [RELEASE-0.1.7.json](https://github.com/lengmh/Krill-Usage/releases/download/v0.1.7/RELEASE-0.1.7.json) 核对 SHA256、源提交与平台。
 
-VS Code 仍为 `0.1.5`，已有 `v0.1.5` 标签及全部发布文件不变。
-
+历史 v0.1.5（VS Code + Codex）和 v0.1.6（Codex 隐私修正）的发行标签及原始资产均保留。
 
 ## 开发与验证
 
@@ -187,7 +186,7 @@ xvfb-run -a npm run test:host
 npm run package
 ```
 
-输出为 `krill-usage-0.1.7.vsix`。CI 不创建 Release，不发布到 Marketplace。
+输出为 `krill-usage-0.1.7.vsix`。普通 CI 不创建 Release；v0.1.7 使用单独的、受校验的一次性 GitHub Release 工作流，不会自动发布 VS Code Marketplace。
 
 ### Codex
 
