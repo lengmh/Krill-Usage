@@ -95,8 +95,17 @@ for (const platform of ['win32-x64','darwin-arm64','linux-x64']) {
   retain(fileName,source);
 }
 const sourceName='krill-usage-'+version+'-source.zip';
+// Archive only rebuild inputs from the sealed commit, never the whole repository.
+const sourceRoots=['src','test','media','plugins/krill-usage','.agents/plugins/marketplace.json',
+  'package.json','package-lock.json','README.md','PRIVACY.md','CHANGELOG.md','LICENSE','NOTICE',
+  'scripts/release-v017.mjs'];
+const sourceFiles=execFileSync('git',['ls-tree','-r','--name-only',sourceCommit,'--',...sourceRoots],{encoding:'utf8'})
+  .trim().split('\n').filter(Boolean).filter(name=>!name.split('/').some(part=>
+    /^(?:\.private|\.ai-toolbox|\.git|node_modules|artifacts|dist|logs|AGENTS\.md|CONTEXT\.md|STATUS\.md|backlog\.json|TEST_REPORT\.md|\.env(?:\..*)?)$/i.test(part))
+    && !/\.(?:log|tmp|vsix|tar\.gz|zip)$/i.test(name));
+assert.ok(sourceFiles.includes('package.json') && sourceFiles.includes('plugins/krill-usage/scripts/package.mjs'));
 exec('git',['archive','--format=zip','--prefix=krill-usage-'+version+'-source/',
-  '--output='+path.resolve(output,sourceName),sourceCommit]);
+  '--output='+path.resolve(output,sourceName),sourceCommit,'--',...sourceFiles]);
 assets.push({name:sourceName, size:readFileSync(path.join(output,sourceName)).length,
   sha256:sha256(path.join(output,sourceName))});
 const manifestName = 'RELEASE-'+version+'.json';
