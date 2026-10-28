@@ -10,7 +10,10 @@ const oldSha='c74467518c35eaacba1ac5d7c588af1e97fac22d';
 function fixture(t,mode='success') {
  const dir=mkdtempSync(path.join(tmpdir(),'krill-release-test-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
  const run=(...args)=>execFileSync('git',args,{cwd:dir,stdio:'pipe'}).toString().trim();
- writeFileSync(path.join(dir,'source.txt'),'synthetic source');run('init','--quiet');run('add','source.txt');run('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','-m','fixture');
+ const sourceFiles=['package.json','src/extension.js','plugins/krill-usage/scripts/package.mjs',
+  '.private/notes.md','plugins/krill-usage/src/.private/record.json','plugins/krill-usage/STATUS.md','plugins/krill-usage/TEST_REPORT.md'];
+ for(const name of sourceFiles) {const file=path.join(dir,name);mkdirSync(path.dirname(file),{recursive:true});writeFileSync(file,name==='package.json'?'{}':'synthetic fixture');}
+ run('init','--quiet');run('add','.');run('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','-m','fixture');
  const sha=run('rev-parse','HEAD');writeFileSync(path.join(dir,'release.mjs'),releaseScript);
  for(const platform of ['win32-x64','darwin-arm64','linux-x64']) {
   const stage=path.join(dir,'stage-'+platform),root=path.join(stage,'krill-usage-codex'),plugin=path.join(root,'plugins/krill-usage');
@@ -53,6 +56,9 @@ test('new corrective release verifies exact-source assets and preserves previous
  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Verified 6 new release assets/);
  const args=JSON.parse(readFileSync(path.join(f.dir,'created.json')));assert.equal(args.filter(x=>x.startsWith('release-assets/')).length,6);
  const manifest=JSON.parse(readFileSync(path.join(f.dir,'release-verify/CODEX-RELEASE-0.1.6.json')));assert.equal(manifest.sourceCommit,f.sha);assert.equal(manifest.previousTag,'v0.1.5');
+ const members=execFileSync('unzip',['-Z','-1',path.join(f.dir,'release-assets/krill-usage-codex-0.1.6-source.zip')],{encoding:'utf8'});
+ assert.match(members,/src\/extension\.js/);assert.match(members,/scripts\/package\.mjs/);
+ assert.doesNotMatch(members,/\.private|STATUS\.md|TEST_REPORT\.md/);
 });
 for(const mode of ['existing-tag','bad-build'])test(`release refuses ${mode} before publication`,{skip:process.platform==='win32'},t=>{
  const f=fixture(t,mode),result=spawnSync(process.execPath,['release.mjs'],{cwd:f.dir,env:f.env,encoding:'utf8'});

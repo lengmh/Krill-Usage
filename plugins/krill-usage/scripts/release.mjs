@@ -46,7 +46,16 @@ for(const platform of platforms) {
   cpSync(source,path.join(output,filename)); assets.push({filename,sha256:sha});
 }
 const sourceName=`krill-usage-codex-${version}-source.zip`;
-execFileSync('git',['archive','--format=zip',`--prefix=krill-usage-codex-${version}-source/`,`--output=${output}/${sourceName}`,sourceCommit]);
+// Archive only rebuild inputs from the sealed commit, never the whole repository.
+const sourceRoots=['src','test','media','plugins/krill-usage','.agents/plugins/marketplace.json',
+  'package.json','package-lock.json','README.md','PRIVACY.md','CHANGELOG.md','LICENSE','NOTICE',
+  'scripts/release-v017.mjs'];
+const sourceFiles=execFileSync('git',['ls-tree','-r','--name-only',sourceCommit,'--',...sourceRoots],{encoding:'utf8'})
+  .trim().split('\n').filter(Boolean).filter(name=>!name.split('/').some(part=>
+    /^(?:\.private|\.ai-toolbox|\.git|node_modules|artifacts|dist|logs|AGENTS\.md|CONTEXT\.md|STATUS\.md|backlog\.json|TEST_REPORT\.md|\.env(?:\..*)?)$/i.test(part))
+    && !/\.(?:log|tmp|vsix|tar\.gz|zip)$/i.test(name));
+assert.ok(sourceFiles.includes('package.json') && sourceFiles.includes('plugins/krill-usage/scripts/package.mjs'));
+execFileSync('git',['archive','--format=zip',`--prefix=krill-usage-codex-${version}-source/`,`--output=${output}/${sourceName}`,sourceCommit,'--',...sourceFiles]);
 assets.push({filename:sourceName,sha256:createHash('sha256').update(readFileSync(`${output}/${sourceName}`)).digest('hex')});
 const manifestName=`CODEX-RELEASE-${version}.json`;
 writeFileSync(`${output}/${manifestName}`,JSON.stringify({version,sourceCommit,tag,previousTag,previousTagCommit,workflowRun:`https://github.com/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`,assets},null,2)+'\n');

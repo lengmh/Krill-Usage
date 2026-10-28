@@ -131,14 +131,14 @@
     "package": "vsce package --no-dependencies --out krill-usage-0.1.7.vsix"
   },
   "files": [
-    "src/**",
+    "src/*.js",
     "media/icon.png",
+    "media/readme-header.png",
     "README.md",
     "PRIVACY.md",
     "CHANGELOG.md",
     "LICENSE",
-    "NOTICE",
-    "TEST_REPORT.md"
+    "NOTICE"
   ],
   "author": "MAOHENG LENG (lengmh)",
   "repository": {
